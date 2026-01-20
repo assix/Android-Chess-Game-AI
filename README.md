@@ -27,7 +27,7 @@ The opponent logic is built from scratch in Kotlin (`ChessLogic.kt`) and feature
 ## 📦 Installation
 1.  Clone the repo: 
     ```bash
-    git clone [https://github.com/assix/Android-Chess-Game-AI.git](https://github.com/assix/Android-Chess-Game-AI.git)
+    git clone https://github.com/assix/Android-Chess-Game-AI.git
     ```
 2.  Open the project in **Android Studio**.
 3.  Sync Gradle and run on an emulator or physical device.
