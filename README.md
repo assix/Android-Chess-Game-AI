@@ -1,8 +1,7 @@
 # Android Chess Game AI
 
-A fully functional chess application for Android, featuring a smart AI opponent and an intuitive touch interface. This project explores mobile game development using Android Studio and AI-assisted code generation.
+A fully functional chess application for Android, featuring a smart AI opponent and an intuitive touch interface.
 
-## Features
 * **Single Player Mode:** Play against a built-in AI engine.
 * **Legal Move Validation:** Highlights valid moves for selected pieces.
 * **Game State Management:** Tracks check, checkmate, and stalemate conditions.
