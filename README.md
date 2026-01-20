@@ -32,5 +32,9 @@ The opponent logic is built from scratch in Kotlin (`ChessLogic.kt`) and feature
 2.  Open the project in **Android Studio**.
 3.  Sync Gradle and run on an emulator or physical device.
 
+## 🎮 Download & Play
+Don't want to build from source? Download the latest playable version directly:
+👉 [**Download Latest APK**](https://github.com/assix/Android-Chess-Game-AI/releases)
+
 ## 🤝 Contributing
 Feel free to open issues or submit PRs if you want to improve the evaluation function or increase the search depth!
