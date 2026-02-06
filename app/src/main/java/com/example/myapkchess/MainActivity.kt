@@ -7,7 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,26 +35,71 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+enum class ColorSelectionMode { WHITE, BLACK, RANDOM, CYCLE }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChessApp() {
+    // Persistent settings state
+    var savedDifficulty by remember { mutableStateOf(3) } // Set to Hard by default
+    var savedColorMode by remember { mutableStateOf(ColorSelectionMode.WHITE) }
+    var savedOpening by remember { mutableStateOf(OpeningType.RANDOM) }
+    var lastPlayerColor by remember { mutableStateOf(PieceColor.BLACK) } // For CYCLE mode
+
     var gameState by remember { mutableStateOf(GameState()) }
     var selectedPosition by remember { mutableStateOf<Position?>(null) }
-    var showDifficultyDialog by remember { mutableStateOf(true) }
-    
+    var showStartDialog by remember { mutableStateOf(true) }
+    var showSettings by remember { mutableStateOf(false) }
+
     val isGameOver = ChessLogic.isCheckmate(gameState) || ChessLogic.isStalemate(gameState)
 
-    if (showDifficultyDialog) {
-        DifficultyDialog(onDifficultySelected = { diff ->
-            gameState = gameState.copy(difficulty = diff)
-            showDifficultyDialog = false
-        })
+    if (showStartDialog) {
+        StartDialog(
+            initialDiff = savedDifficulty,
+            initialColorMode = savedColorMode,
+            initialOpening = savedOpening,
+            onStart = { diff, colorMode, opening ->
+                savedDifficulty = diff
+                savedColorMode = colorMode
+                savedOpening = opening
+                
+                val playerColor = when (colorMode) {
+                    ColorSelectionMode.WHITE -> PieceColor.WHITE
+                    ColorSelectionMode.BLACK -> PieceColor.BLACK
+                    ColorSelectionMode.RANDOM -> PieceColor.values().random()
+                    ColorSelectionMode.CYCLE -> if (lastPlayerColor == PieceColor.BLACK) PieceColor.WHITE else PieceColor.BLACK
+                }
+                lastPlayerColor = playerColor
+                
+                gameState = GameState(
+                    difficulty = diff,
+                    playerColor = playerColor,
+                    selectedOpening = opening,
+                    turn = PieceColor.WHITE 
+                )
+                showStartDialog = false
+                selectedPosition = null
+            }
+        )
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            currentGameState = gameState,
+            onDismiss = { showSettings = false },
+            onUpdate = { gameState = it }
+        )
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Chess AI", fontWeight = FontWeight.Bold) },
+                title = { Text("Chess Pro", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { showSettings = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -60,19 +109,19 @@ fun ChessApp() {
         bottomBar = {
             Surface(
                 tonalElevation = 3.dp,
-                modifier = Modifier.navigationBarsPadding() // Raises the bar above Android navigation
+                modifier = Modifier.navigationBarsPadding()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 24.dp), // Increased vertical padding
+                        .padding(horizontal = 16.dp, vertical = 20.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(onClick = {
                         if (gameState.moveHistory.isNotEmpty()) {
                             var newState = undoMove(gameState)
-                            if (newState.turn == PieceColor.BLACK && newState.moveHistory.isNotEmpty()) {
+                            if (newState.turn != gameState.playerColor && newState.moveHistory.isNotEmpty()) {
                                 newState = undoMove(newState)
                             }
                             gameState = newState
@@ -81,9 +130,7 @@ fun ChessApp() {
                     }) { Text("Undo") }
                     
                     Button(onClick = {
-                        gameState = GameState()
-                        showDifficultyDialog = true
-                        selectedPosition = null
+                        showStartDialog = true
                     }) { Text("Reset") }
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -97,78 +144,164 @@ fun ChessApp() {
             }
         }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            val statusText = when {
-                ChessLogic.isCheckmate(gameState) -> "CHECKMATE! ${if (gameState.turn == PieceColor.WHITE) "Black" else "White"} Wins!"
-                ChessLogic.isStalemate(gameState) -> "Stalemate! Draw."
-                gameState.turn == PieceColor.WHITE -> "Your Turn"
-                else -> "Computer is thinking..."
-            }
-            
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.headlineMedium,
-                color = if (isGameOver) Color.Red else MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-            
-            ChessBoard(
-                gameState = gameState,
-                selectedPosition = selectedPosition,
-                onSquareClick = { pos ->
-                    if (gameState.turn == PieceColor.WHITE && !isGameOver) {
-                        val piece = gameState.board[pos]
-                        if (selectedPosition == null) {
-                            if (piece?.color == PieceColor.WHITE) {
-                                selectedPosition = pos
-                            }
-                        } else {
-                            if (ChessLogic.isValidMove(selectedPosition!!, pos, gameState)) {
-                                gameState = ChessLogic.movePiece(selectedPosition!!, pos, gameState)
-                                selectedPosition = null
-                            } else if (piece?.color == PieceColor.WHITE) {
-                                selectedPosition = pos
+        Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+            Column(
+                modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                val statusText = when {
+                    ChessLogic.isCheckmate(gameState) -> "CHECKMATE! ${if (gameState.turn == PieceColor.WHITE) "Black" else "White"} Wins!"
+                    ChessLogic.isStalemate(gameState) -> "Stalemate!"
+                    gameState.turn == gameState.playerColor -> "Your Turn"
+                    else -> "AI Thinking..."
+                }
+                
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = if (isGameOver) Color.Red else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                
+                ChessBoard(
+                    gameState = gameState,
+                    selectedPosition = selectedPosition,
+                    onSquareClick = { pos ->
+                        if (gameState.turn == gameState.playerColor && !isGameOver && gameState.pendingPromotion == null) {
+                            val piece = gameState.board[pos]
+                            if (selectedPosition == null) {
+                                if (piece?.color == gameState.playerColor) {
+                                    selectedPosition = pos
+                                }
                             } else {
-                                selectedPosition = null
+                                if (ChessLogic.isValidMove(selectedPosition!!, pos, gameState)) {
+                                    gameState = ChessLogic.movePiece(selectedPosition!!, pos, gameState)
+                                    selectedPosition = null
+                                } else if (piece?.color == gameState.playerColor) {
+                                    selectedPosition = pos
+                                } else {
+                                    selectedPosition = null
+                                }
                             }
                         }
                     }
-                }
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            if (isGameOver) {
-                Button(onClick = {
-                    gameState = GameState()
-                    showDifficultyDialog = true
-                    selectedPosition = null
-                }) {
-                    Text("Play Again")
-                }
-            } else {
-                Text(
-                    text = "Difficulty: ${getDifficultyName(gameState.difficulty)}",
-                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+
+            if (gameState.pendingPromotion != null) {
+                PromotionDialog(
+                    color = gameState.turn,
+                    onSelect = { type ->
+                        gameState = ChessLogic.promotePawn(gameState.pendingPromotion!!, type, gameState)
+                    }
                 )
             }
         }
     }
 
-    // Computer Move Logic
-    LaunchedEffect(gameState.turn) {
-        if (gameState.turn == PieceColor.BLACK && !isGameOver) {
+    // Key includes turn AND playerColor to fix the AI-not-starting-when-player-is-black bug
+    LaunchedEffect(gameState.turn, gameState.playerColor) {
+        if (gameState.turn != gameState.playerColor && !isGameOver && gameState.pendingPromotion == null) {
             delay(800)
             gameState = ChessLogic.getBestMove(gameState)
         }
     }
+}
+
+@Composable
+fun PromotionDialog(color: PieceColor, onSelect: (PieceType) -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Promote Pawn") },
+        text = {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                listOf(PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT).forEach { type ->
+                    TextButton(onClick = { onSelect(type) }) {
+                        Text(getPieceSymbol(ChessPiece(type, color)), fontSize = 32.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun StartDialog(
+    initialDiff: Int,
+    initialColorMode: ColorSelectionMode,
+    initialOpening: OpeningType,
+    onStart: (Int, ColorSelectionMode, OpeningType) -> Unit
+) {
+    var diff by remember { mutableStateOf(initialDiff) }
+    var colorMode by remember { mutableStateOf(initialColorMode) }
+    var opening by remember { mutableStateOf(initialOpening) }
+
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("New Game Setup") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(1, 2, 3).forEach { d ->
+                        FilterChip(selected = diff == d, onClick = { diff = d }, label = { Text(getDifficultyName(d)) })
+                    }
+                }
+                
+                Text("Your Color", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ColorSelectionMode.values().forEach { mode ->
+                        FilterChip(
+                            selected = colorMode == mode,
+                            onClick = { colorMode = mode },
+                            label = { Text(mode.name.lowercase().capitalize()) }
+                        )
+                    }
+                }
+                
+                Text("AI Opening Strategy", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    OpeningType.values().forEach { o ->
+                        FilterChip(
+                            selected = opening == o,
+                            onClick = { opening = o },
+                            label = { Text(o.displayName) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onStart(diff, colorMode, opening) }) { Text("Start Game") }
+        }
+    )
+}
+
+@Composable
+fun SettingsDialog(currentGameState: GameState, onDismiss: () -> Unit, onUpdate: (GameState) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Game Settings") },
+        text = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Help Mode Indicators")
+                    Switch(checked = currentGameState.isHelpMode, onCheckedChange = { onUpdate(currentGameState.copy(isHelpMode = it)) })
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Developed by assix",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.End)
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
+    )
 }
 
 fun undoMove(state: GameState): GameState {
@@ -180,10 +313,20 @@ fun undoMove(state: GameState): GameState {
     if (lastMove.pieceCaptured != null) {
         newBoard[lastMove.to] = lastMove.pieceCaptured
     }
+    if (lastMove.isCastling) {
+        val row = lastMove.from.row
+        val rookFromCol = if (lastMove.to.col == 6) 7 else 0
+        val rookToCol = if (lastMove.to.col == 6) 5 else 3
+        val rook = newBoard.remove(Position(row, rookToCol))
+        if (rook != null) {
+            newBoard[Position(row, rookFromCol)] = rook.copy(hasMoved = false)
+        }
+    }
     return state.copy(
         board = newBoard,
         turn = lastMove.pieceMoved.color,
-        moveHistory = state.moveHistory.dropLast(1)
+        moveHistory = state.moveHistory.dropLast(1),
+        pendingPromotion = null
     )
 }
 
@@ -207,14 +350,14 @@ fun ChessBoard(
     Card(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier
-            .aspectRatio(1f)
-            .padding(12.dp)
+        modifier = Modifier.aspectRatio(1f).padding(12.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            for (row in 0..7) {
+            val range = if (gameState.playerColor == PieceColor.WHITE) 0..7 else 7 downTo 0
+            for (row in range) {
                 Row(modifier = Modifier.weight(1f)) {
-                    for (col in 0..7) {
+                    val colRange = if (gameState.playerColor == PieceColor.WHITE) 0..7 else 7 downTo 0
+                    for (col in colRange) {
                         val pos = Position(row, col)
                         val piece = gameState.board[pos]
                         val isSelected = pos == selectedPosition
@@ -224,41 +367,23 @@ fun ChessBoard(
                         val bgColor = if (isLightSquare) Color(0xFFF0D9B5) else Color(0xFFB58863)
                         
                         Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .background(bgColor)
-                                .clickable { onSquareClick(pos) },
+                            modifier = Modifier.weight(1f).fillMaxHeight().background(bgColor).clickable { onSquareClick(pos) },
                             contentAlignment = Alignment.Center
                         ) {
-                            if (isSelected) {
-                                Box(modifier = Modifier.fillMaxSize().background(Color.Yellow.copy(alpha = 0.4f)))
-                            }
+                            if (isSelected) Box(modifier = Modifier.fillMaxSize().background(Color.Yellow.copy(alpha = 0.4f)))
                             
                             if (isPossibleMove) {
-                                if (gameState.isHelpMode) {
-                                    val isDangerous = ChessLogic.isDangerous(pos, PieceColor.WHITE, gameState)
-                                    val indicatorColor = if (isDangerous) Color.Red.copy(alpha = 0.6f) else Color.Green.copy(alpha = 0.6f)
-                                    Box(
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .background(indicatorColor, RoundedCornerShape(10.dp))
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(12.dp)
-                                            .background(Color.Black.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                    )
-                                }
+                                val indicatorColor = if (gameState.isHelpMode) {
+                                    if (ChessLogic.isDangerous(pos, gameState.playerColor, gameState)) Color.Red.copy(alpha = 0.6f) else Color.Green.copy(alpha = 0.6f)
+                                } else Color.Black.copy(alpha = 0.15f)
+                                Box(modifier = Modifier.size(if(gameState.isHelpMode) 20.dp else 12.dp).background(indicatorColor, RoundedCornerShape(10.dp)))
                             }
 
                             if (piece != null) {
                                 Text(
                                     text = getPieceSymbol(piece),
                                     fontSize = 40.sp,
-                                    color = if (piece.color == PieceColor.WHITE) Color.White else Color.Black,
-                                    modifier = Modifier.offset(y = (-2).dp)
+                                    color = if (piece.color == PieceColor.WHITE) Color.White else Color.Black
                                 )
                             }
                         }
@@ -290,31 +415,4 @@ fun getPieceSymbol(piece: ChessPiece): String {
     }
 }
 
-@Composable
-fun DifficultyDialog(onDifficultySelected: (Int) -> Unit) {
-    AlertDialog(
-        onDismissRequest = { },
-        title = { Text("Choose Your Challenge") },
-        text = {
-            Column {
-                Text("Select difficulty level:", modifier = Modifier.padding(bottom = 16.dp))
-                Button(
-                    onClick = { onDifficultySelected(1) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                ) { Text("Easy (Random moves)") }
-                Button(
-                    onClick = { onDifficultySelected(2) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) { Text("Medium (Thinking ahead)") }
-                Button(
-                    onClick = { onDifficultySelected(3) },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-                ) { Text("Hard (Chess Master)") }
-            }
-        },
-        confirmButton = {}
-    )
-}
+fun String.capitalize() = this.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
