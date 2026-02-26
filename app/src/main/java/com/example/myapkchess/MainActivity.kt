@@ -17,7 +17,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapkchess.ui.theme.MyApkChessTheme
@@ -41,10 +45,10 @@ enum class ColorSelectionMode { WHITE, BLACK, RANDOM, CYCLE }
 @Composable
 fun ChessApp() {
     // Persistent settings state
-    var savedDifficulty by remember { mutableStateOf(3) } // Set to Hard by default
+    var savedDifficulty by remember { mutableStateOf(3) }
     var savedColorMode by remember { mutableStateOf(ColorSelectionMode.WHITE) }
     var savedOpening by remember { mutableStateOf(OpeningType.RANDOM) }
-    var lastPlayerColor by remember { mutableStateOf(PieceColor.BLACK) } // For CYCLE mode
+    var lastPlayerColor by remember { mutableStateOf(PieceColor.BLACK) }
 
     var gameState by remember { mutableStateOf(GameState()) }
     var selectedPosition by remember { mutableStateOf<Position?>(null) }
@@ -200,7 +204,6 @@ fun ChessApp() {
         }
     }
 
-    // Key includes turn AND playerColor to fix the AI-not-starting-when-player-is-black bug
     LaunchedEffect(gameState.turn, gameState.playerColor) {
         if (gameState.turn != gameState.playerColor && !isGameOver && gameState.pendingPromotion == null) {
             delay(800)
@@ -218,7 +221,7 @@ fun PromotionDialog(color: PieceColor, onSelect: (PieceType) -> Unit) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 listOf(PieceType.QUEEN, PieceType.ROOK, PieceType.BISHOP, PieceType.KNIGHT).forEach { type ->
                     TextButton(onClick = { onSelect(type) }) {
-                        Text(getPieceSymbol(ChessPiece(type, color)), fontSize = 32.sp)
+                        PieceIcon(piece = ChessPiece(type, color), fontSize = 32.sp)
                     }
                 }
             }
@@ -257,7 +260,7 @@ fun StartDialog(
                         FilterChip(
                             selected = colorMode == mode,
                             onClick = { colorMode = mode },
-                            label = { Text(mode.name.lowercase().capitalize()) }
+                            label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) }
                         )
                     }
                 }
@@ -291,7 +294,8 @@ fun SettingsDialog(currentGameState: GameState, onDismiss: () -> Unit, onUpdate:
                     Text("Help Mode Indicators")
                     Switch(checked = currentGameState.isHelpMode, onCheckedChange = { onUpdate(currentGameState.copy(isHelpMode = it)) })
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(24.dp))
+                
                 Text(
                     text = "Developed by assix",
                     style = MaterialTheme.typography.bodySmall,
@@ -380,11 +384,7 @@ fun ChessBoard(
                             }
 
                             if (piece != null) {
-                                Text(
-                                    text = getPieceSymbol(piece),
-                                    fontSize = 40.sp,
-                                    color = if (piece.color == PieceColor.WHITE) Color.White else Color.Black
-                                )
+                                PieceIcon(piece = piece, fontSize = 40.sp)
                             }
                         }
                     }
@@ -394,24 +394,49 @@ fun ChessBoard(
     }
 }
 
+@Composable
+fun PieceIcon(piece: ChessPiece, fontSize: TextUnit) {
+    val symbol = getPieceSymbol(piece)
+    Box(contentAlignment = Alignment.Center) {
+        if (piece.color == PieceColor.WHITE) {
+            // Draw a thick black outline first
+            Text(
+                text = symbol,
+                fontSize = fontSize,
+                color = Color.Black,
+                style = TextStyle(
+                    drawStyle = Stroke(
+                        width = 4f,
+                        join = StrokeJoin.Round
+                    )
+                )
+            )
+            // Draw the solid white fill inside the outline
+            Text(
+                text = symbol,
+                fontSize = fontSize,
+                color = Color.White
+            )
+        } else {
+            // Black pieces are just drawn normally
+            Text(
+                text = symbol,
+                fontSize = fontSize,
+                color = Color.Black
+            )
+        }
+    }
+}
+
+// Always use the filled (solid) Unicode shapes for both colors so we can color them properly
 fun getPieceSymbol(piece: ChessPiece): String {
-    return when (piece.color) {
-        PieceColor.WHITE -> when (piece.type) {
-            PieceType.PAWN -> "♙"
-            PieceType.ROOK -> "♖"
-            PieceType.KNIGHT -> "♘"
-            PieceType.BISHOP -> "♗"
-            PieceType.QUEEN -> "♕"
-            PieceType.KING -> "♔"
-        }
-        PieceColor.BLACK -> when (piece.type) {
-            PieceType.PAWN -> "♟"
-            PieceType.ROOK -> "♜"
-            PieceType.KNIGHT -> "♞"
-            PieceType.BISHOP -> "♝"
-            PieceType.QUEEN -> "♛"
-            PieceType.KING -> "♚"
-        }
+    return when (piece.type) {
+        PieceType.PAWN -> "♟"
+        PieceType.ROOK -> "♜"
+        PieceType.KNIGHT -> "♞"
+        PieceType.BISHOP -> "♝"
+        PieceType.QUEEN -> "♛"
+        PieceType.KING -> "♚"
     }
 }
 
