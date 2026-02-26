@@ -14,7 +14,6 @@ object ChessLogic {
             for (col in 0..7) {
                 val target = Position(row, col)
                 if (isValidMoveBasic(position, target, state)) {
-                    // Filter moves that leave our king in check
                     if (!moveLeavesKingInCheck(position, target, state)) {
                         candidateMoves.add(target)
                     }
@@ -176,7 +175,6 @@ object ChessLogic {
     }
 
     private fun makeHeuristicMove(state: GameState, depth: Int): GameState {
-        // Shuffle the moves so opening ties are evaluated and picked randomly
         val moves = getAllLegalMoves(state).shuffled()
         if (moves.isEmpty()) return state
         
@@ -240,8 +238,8 @@ object ChessLogic {
             return if (state.turn == PieceColor.WHITE) 10000 else -10000
         }
         var score = 0
-        for (piece in state.board.values) {
-            val value = when (piece.type) {
+        for ((pos, piece) in state.board) {
+            var value = when (piece.type) {
                 PieceType.PAWN -> 10
                 PieceType.KNIGHT -> 30
                 PieceType.BISHOP -> 30
@@ -249,6 +247,13 @@ object ChessLogic {
                 PieceType.QUEEN -> 90
                 PieceType.KING -> 900
             }
+
+            if (piece.type == PieceType.QUEEN) {
+                if (isDangerous(pos, piece.color, state)) {
+                    value -= 85 
+                }
+            }
+
             if (piece.color == PieceColor.BLACK) score += value else score -= value
         }
         return score
@@ -258,17 +263,34 @@ object ChessLogic {
         val board = state.board.toMutableMap()
         val piece = board.remove(from)!!
         val captured = board.put(to, piece)
+        
+        var pendingPromo = state.pendingPromotion
+        
+        if (piece.type == PieceType.PAWN) {
+            if ((piece.color == PieceColor.WHITE && to.row == 0) || 
+                (piece.color == PieceColor.BLACK && to.row == 7)) {
+                
+                if (piece.color != state.playerColor) {
+                    board[to] = ChessPiece(PieceType.QUEEN, piece.color)
+                } else {
+                    pendingPromo = to
+                }
+            }
+        }
+
         val move = Move(from, to, piece, captured)
         return state.copy(
             board = board,
             turn = if (state.turn == PieceColor.WHITE) PieceColor.BLACK else PieceColor.WHITE,
-            moveHistory = state.moveHistory + move
+            moveHistory = state.moveHistory + move,
+            pendingPromotion = pendingPromo
         )
     }
 
     fun isValidMove(from: Position, to: Position, state: GameState): Boolean {
         return to in getLegalMoves(from, state)
     }
+
     fun promotePawn(position: Position, newType: PieceType, state: GameState): GameState {
         val board = state.board.toMutableMap()
         val piece = board[position]
@@ -279,5 +301,33 @@ object ChessLogic {
             board = board,
             pendingPromotion = null
         )
+    }
+
+    private fun getAlgebraic(pos: Position): String {
+        val file = ('a' + pos.col)
+        val rank = 8 - pos.row
+        return "$file$rank"
+    }
+
+    fun getOpeningName(history: List<Move>): String {
+        if (history.isEmpty()) return "Starting Position"
+        val sequence = history.joinToString(" ") { getAlgebraic(it.from) + getAlgebraic(it.to) }
+        
+        return when {
+            sequence.startsWith("d2d4 d7d5 c1f4") || sequence.startsWith("d2d4 g8f6 c1f4") -> "London System"
+            sequence.startsWith("d2d4 d7d5 c2c4") -> "Queen's Gambit"
+            sequence.startsWith("d2d4 d7d5") -> "Queen's Pawn Game"
+            sequence.startsWith("d2d4") -> "Queen's Pawn Game"
+            sequence.startsWith("e2e4 c7c5") -> "Sicilian Defense"
+            sequence.startsWith("e2e4 e7e6") -> "French Defense"
+            sequence.startsWith("e2e4 c7c6") -> "Caro-Kann Defense"
+            sequence.startsWith("e2e4 e7e5 g1f3 b8c6 f1b5") -> "Ruy Lopez"
+            sequence.startsWith("e2e4 e7e5 g1f3 b8c6 f1c4") -> "Italian Game"
+            sequence.startsWith("e2e4 e7e5") -> "Open Game"
+            sequence.startsWith("e2e4") -> "King's Pawn Game"
+            sequence.startsWith("c2c4") -> "English Opening"
+            sequence.startsWith("g1f3") -> "Réti Opening"
+            else -> "Unknown / Transposition"
+        }
     }
 }

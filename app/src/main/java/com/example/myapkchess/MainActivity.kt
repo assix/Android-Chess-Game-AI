@@ -44,7 +44,6 @@ enum class ColorSelectionMode { WHITE, BLACK, RANDOM, CYCLE }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChessApp() {
-    // Persistent settings state
     var savedDifficulty by remember { mutableStateOf(3) }
     var savedColorMode by remember { mutableStateOf(ColorSelectionMode.WHITE) }
     var savedOpening by remember { mutableStateOf(OpeningType.RANDOM) }
@@ -70,7 +69,7 @@ fun ChessApp() {
                 val playerColor = when (colorMode) {
                     ColorSelectionMode.WHITE -> PieceColor.WHITE
                     ColorSelectionMode.BLACK -> PieceColor.BLACK
-                    ColorSelectionMode.RANDOM -> PieceColor.values().random()
+                    ColorSelectionMode.RANDOM -> PieceColor.entries.random()
                     ColorSelectionMode.CYCLE -> if (lastPlayerColor == PieceColor.BLACK) PieceColor.WHITE else PieceColor.BLACK
                 }
                 lastPlayerColor = playerColor
@@ -191,11 +190,20 @@ fun ChessApp() {
                         }
                     }
                 )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Opening: ${ChessLogic.getOpeningName(gameState.moveHistory)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
             }
 
             if (gameState.pendingPromotion != null) {
                 PromotionDialog(
-                    color = gameState.turn,
+                    color = gameState.playerColor, // FIX: Use player's color instead of the current turn's color
                     onSelect = { type ->
                         gameState = ChessLogic.promotePawn(gameState.pendingPromotion!!, type, gameState)
                     }
@@ -204,7 +212,8 @@ fun ChessApp() {
         }
     }
 
-    LaunchedEffect(gameState.turn, gameState.playerColor) {
+    // FIX: Added gameState.pendingPromotion to the keys so the AI wakes up when the dialog closes
+    LaunchedEffect(gameState.turn, gameState.playerColor, gameState.pendingPromotion) {
         if (gameState.turn != gameState.playerColor && !isGameOver && gameState.pendingPromotion == null) {
             delay(800)
             gameState = ChessLogic.getBestMove(gameState)
@@ -256,7 +265,7 @@ fun StartDialog(
                 
                 Text("Your Color", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ColorSelectionMode.values().forEach { mode ->
+                    ColorSelectionMode.entries.forEach { mode ->
                         FilterChip(
                             selected = colorMode == mode,
                             onClick = { colorMode = mode },
@@ -267,7 +276,7 @@ fun StartDialog(
                 
                 Text("AI Opening Strategy", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OpeningType.values().forEach { o ->
+                    OpeningType.entries.forEach { o ->
                         FilterChip(
                             selected = opening == o,
                             onClick = { opening = o },
@@ -399,7 +408,6 @@ fun PieceIcon(piece: ChessPiece, fontSize: TextUnit) {
     val symbol = getPieceSymbol(piece)
     Box(contentAlignment = Alignment.Center) {
         if (piece.color == PieceColor.WHITE) {
-            // Draw a thick black outline first
             Text(
                 text = symbol,
                 fontSize = fontSize,
@@ -411,14 +419,12 @@ fun PieceIcon(piece: ChessPiece, fontSize: TextUnit) {
                     )
                 )
             )
-            // Draw the solid white fill inside the outline
             Text(
                 text = symbol,
                 fontSize = fontSize,
                 color = Color.White
             )
         } else {
-            // Black pieces are just drawn normally
             Text(
                 text = symbol,
                 fontSize = fontSize,
@@ -428,7 +434,6 @@ fun PieceIcon(piece: ChessPiece, fontSize: TextUnit) {
     }
 }
 
-// Always use the filled (solid) Unicode shapes for both colors so we can color them properly
 fun getPieceSymbol(piece: ChessPiece): String {
     return when (piece.type) {
         PieceType.PAWN -> "♟"
