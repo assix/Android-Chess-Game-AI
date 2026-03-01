@@ -21,9 +21,11 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import com.example.myapkchess.ui.theme.MyApkChessTheme
 import kotlinx.coroutines.delay
 
@@ -47,24 +49,31 @@ fun ChessApp() {
     var savedDifficulty by remember { mutableStateOf(3) }
     var savedColorMode by remember { mutableStateOf(ColorSelectionMode.WHITE) }
     var savedOpening by remember { mutableStateOf(OpeningType.RANDOM) }
+    var savedTimeMinutes by remember { mutableStateOf(10) }
     var lastPlayerColor by remember { mutableStateOf(PieceColor.BLACK) }
 
     var gameState by remember { mutableStateOf(GameState()) }
     var selectedPosition by remember { mutableStateOf<Position?>(null) }
     var showStartDialog by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    var undoCount by remember { mutableStateOf(0) }
 
-    val isGameOver = ChessLogic.isCheckmate(gameState) || ChessLogic.isStalemate(gameState)
+    var playerTimeSeconds by remember { mutableStateOf(600) }
+
+    val isTimeOut = playerTimeSeconds <= 0
+    val isGameOver = ChessLogic.isCheckmate(gameState) || ChessLogic.isStalemate(gameState) || isTimeOut
 
     if (showStartDialog) {
         StartDialog(
             initialDiff = savedDifficulty,
             initialColorMode = savedColorMode,
             initialOpening = savedOpening,
-            onStart = { diff, colorMode, opening ->
+            initialTimeMinutes = savedTimeMinutes,
+            onStart = { diff, colorMode, opening, timeMins ->
                 savedDifficulty = diff
                 savedColorMode = colorMode
                 savedOpening = opening
+                savedTimeMinutes = timeMins
                 
                 val playerColor = when (colorMode) {
                     ColorSelectionMode.WHITE -> PieceColor.WHITE
@@ -80,8 +89,12 @@ fun ChessApp() {
                     selectedOpening = opening,
                     turn = PieceColor.WHITE 
                 )
+                
+                playerTimeSeconds = timeMins * 60
+                
                 showStartDialog = false
                 selectedPosition = null
+                undoCount = 0
             }
         )
     }
@@ -92,6 +105,17 @@ fun ChessApp() {
             onDismiss = { showSettings = false },
             onUpdate = { gameState = it }
         )
+    }
+
+    LaunchedEffect(gameState.turn, isGameOver) {
+        if (!isGameOver) {
+            while (true) {
+                delay(1000L)
+                if (gameState.turn == gameState.playerColor) {
+                    if (playerTimeSeconds > 0) playerTimeSeconds--
+                }
+            }
+        }
     }
 
     Scaffold(
@@ -122,13 +146,14 @@ fun ChessApp() {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(onClick = {
-                        if (gameState.moveHistory.isNotEmpty()) {
+                        if (gameState.moveHistory.isNotEmpty() && !isTimeOut) {
                             var newState = undoMove(gameState)
                             if (newState.turn != gameState.playerColor && newState.moveHistory.isNotEmpty()) {
                                 newState = undoMove(newState)
                             }
                             gameState = newState
                             selectedPosition = null
+                            undoCount++
                         }
                     }) { Text("Undo") }
                     
@@ -154,8 +179,9 @@ fun ChessApp() {
                 verticalArrangement = Arrangement.Center
             ) {
                 val statusText = when {
-                    ChessLogic.isCheckmate(gameState) -> "CHECKMATE! ${if (gameState.turn == PieceColor.WHITE) "Black" else "White"} Wins!"
-                    ChessLogic.isStalemate(gameState) -> "Stalemate!"
+                    playerTimeSeconds <= 0 -> "Time's up! AI Wins. Undos: $undoCount"
+                    ChessLogic.isCheckmate(gameState) -> "Checkmate! Undos: $undoCount"
+                    ChessLogic.isStalemate(gameState) -> "Stalemate! Undos: $undoCount"
                     gameState.turn == gameState.playerColor -> "Your Turn"
                     else -> "AI Thinking..."
                 }
@@ -191,6 +217,12 @@ fun ChessApp() {
                     }
                 )
 
+                TimerView(
+                    timeSeconds = playerTimeSeconds,
+                    isTurn = gameState.turn == gameState.playerColor && !isGameOver,
+                    label = "You"
+                )
+
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 Text(
@@ -203,7 +235,7 @@ fun ChessApp() {
 
             if (gameState.pendingPromotion != null) {
                 PromotionDialog(
-                    color = gameState.playerColor, // FIX: Use player's color instead of the current turn's color
+                    color = gameState.playerColor,
                     onSelect = { type ->
                         gameState = ChessLogic.promotePawn(gameState.pendingPromotion!!, type, gameState)
                     }
@@ -212,11 +244,35 @@ fun ChessApp() {
         }
     }
 
-    // FIX: Added gameState.pendingPromotion to the keys so the AI wakes up when the dialog closes
-    LaunchedEffect(gameState.turn, gameState.playerColor, gameState.pendingPromotion) {
+    LaunchedEffect(gameState.turn, gameState.playerColor, gameState.pendingPromotion, isGameOver) {
         if (gameState.turn != gameState.playerColor && !isGameOver && gameState.pendingPromotion == null) {
             delay(800)
             gameState = ChessLogic.getBestMove(gameState)
+        }
+    }
+}
+
+@Composable
+fun TimerView(timeSeconds: Int, isTurn: Boolean, label: String) {
+    val minutes = timeSeconds / 60
+    val seconds = timeSeconds % 60
+    val timeString = "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    
+    val bgColor = if (isTurn) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    val textColor = if (isTurn) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = bgColor),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.padding(vertical = 4.dp).width(120.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+            Text(
+                text = "$label: $timeString",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (timeSeconds <= 10 && timeSeconds > 0) Color.Red else textColor
+            )
         }
     }
 }
@@ -245,31 +301,53 @@ fun StartDialog(
     initialDiff: Int,
     initialColorMode: ColorSelectionMode,
     initialOpening: OpeningType,
-    onStart: (Int, ColorSelectionMode, OpeningType) -> Unit
+    initialTimeMinutes: Int,
+    onStart: (Int, ColorSelectionMode, OpeningType, Int) -> Unit
 ) {
     var diff by remember { mutableStateOf(initialDiff) }
     var colorMode by remember { mutableStateOf(initialColorMode) }
     var opening by remember { mutableStateOf(initialOpening) }
+    var timeMins by remember { mutableStateOf(initialTimeMinutes) }
 
     AlertDialog(
         onDismissRequest = {},
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.fillMaxWidth(0.98f).padding(horizontal = 8.dp),
         title = { Text("New Game Setup") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(1, 2, 3).forEach { d ->
-                        FilterChip(selected = diff == d, onClick = { diff = d }, label = { Text(getDifficultyName(d)) })
+                        FilterChip(
+                            modifier = Modifier.weight(1f),
+                            selected = diff == d,
+                            onClick = { diff = d },
+                            label = { Text(getDifficultyName(d), fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
+                        )
                     }
                 }
                 
                 Text("Your Color", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     ColorSelectionMode.entries.forEach { mode ->
                         FilterChip(
+                            modifier = Modifier.weight(1f),
                             selected = colorMode == mode,
                             onClick = { colorMode = mode },
-                            label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                            label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }, fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 1, softWrap = false, modifier = Modifier.fillMaxWidth()) }
+                        )
+                    }
+                }
+                
+                Text("Time Control", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(3, 5, 10, 30).forEach { t ->
+                        FilterChip(
+                            modifier = Modifier.weight(1f),
+                            selected = timeMins == t,
+                            onClick = { timeMins = t },
+                            label = { Text("${t}m", fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }
                         )
                     }
                 }
@@ -280,14 +358,14 @@ fun StartDialog(
                         FilterChip(
                             selected = opening == o,
                             onClick = { opening = o },
-                            label = { Text(o.displayName) }
+                            label = { Text(o.displayName, fontSize = 12.sp) }
                         )
                     }
                 }
             }
         },
         confirmButton = {
-            Button(onClick = { onStart(diff, colorMode, opening) }) { Text("Start Game") }
+            Button(onClick = { onStart(diff, colorMode, opening, timeMins) }) { Text("Start Game") }
         }
     )
 }
