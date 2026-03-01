@@ -34,7 +34,7 @@ object ChessLogic {
             PieceType.KNIGHT -> validateKnightMove(from, to)
             PieceType.BISHOP -> validateBishopMove(from, to, state)
             PieceType.QUEEN -> validateQueenMove(from, to, state)
-            PieceType.KING -> validateKingMove(from, to)
+            PieceType.KING -> validateKingMove(from, to, piece, state)
         }
     }
 
@@ -119,8 +119,33 @@ object ChessLogic {
         return isPathClear(from, to, state.board)
     }
 
-    private fun validateKingMove(from: Position, to: Position): Boolean {
-        return abs(to.row - from.row) <= 1 && abs(to.col - from.col) <= 1
+    private fun validateKingMove(from: Position, to: Position, piece: ChessPiece, state: GameState): Boolean {
+        val dr = abs(to.row - from.row)
+        val dc = abs(to.col - from.col)
+        if (dr <= 1 && dc <= 1) return true
+
+        if (dr == 0 && dc == 2 && !piece.hasMoved) {
+            if (isKingInCheck(piece.color, state.board)) return false
+            
+            val direction = if (to.col > from.col) 1 else -1
+            val rookCol = if (direction == 1) 7 else 0
+            val rookPos = Position(from.row, rookCol)
+            val rook = state.board[rookPos]
+            
+            if (rook == null || rook.type != PieceType.ROOK || rook.hasMoved) return false
+            
+            var c = from.col + direction
+            while (c != rookCol) {
+                if (state.board[Position(from.row, c)] != null) return false
+                c += direction
+            }
+            
+            val squareCrossed = Position(from.row, from.col + direction)
+            if (isDangerous(squareCrossed, piece.color, state)) return false
+            
+            return true
+        }
+        return false
     }
 
     private fun isPathClear(from: Position, to: Position, board: Map<Position, ChessPiece>): Boolean {
@@ -262,23 +287,36 @@ object ChessLogic {
     fun movePiece(from: Position, to: Position, state: GameState): GameState {
         val board = state.board.toMutableMap()
         val piece = board.remove(from)!!
-        val captured = board.put(to, piece)
+        
+        var isCastlingMove = false
+        if (piece.type == PieceType.KING && abs(to.col - from.col) == 2) {
+            isCastlingMove = true
+            val rookFromCol = if (to.col > from.col) 7 else 0
+            val rookToCol = if (to.col > from.col) to.col - 1 else to.col + 1
+            val rook = board.remove(Position(from.row, rookFromCol))
+            if (rook != null) {
+                board[Position(from.row, rookToCol)] = rook.copy(hasMoved = true)
+            }
+        }
+
+        val movedPiece = piece.copy(hasMoved = true)
+        val captured = board.put(to, movedPiece)
         
         var pendingPromo = state.pendingPromotion
         
-        if (piece.type == PieceType.PAWN) {
-            if ((piece.color == PieceColor.WHITE && to.row == 0) || 
-                (piece.color == PieceColor.BLACK && to.row == 7)) {
+        if (movedPiece.type == PieceType.PAWN) {
+            if ((movedPiece.color == PieceColor.WHITE && to.row == 0) || 
+                (movedPiece.color == PieceColor.BLACK && to.row == 7)) {
                 
-                if (piece.color != state.playerColor) {
-                    board[to] = ChessPiece(PieceType.QUEEN, piece.color)
+                if (movedPiece.color != state.playerColor) {
+                    board[to] = movedPiece.copy(type = PieceType.QUEEN)
                 } else {
                     pendingPromo = to
                 }
             }
         }
 
-        val move = Move(from, to, piece, captured)
+        val move = Move(from = from, to = to, pieceMoved = piece, pieceCaptured = captured, isCastling = isCastlingMove)
         return state.copy(
             board = board,
             turn = if (state.turn == PieceColor.WHITE) PieceColor.BLACK else PieceColor.WHITE,
@@ -295,7 +333,7 @@ object ChessLogic {
         val board = state.board.toMutableMap()
         val piece = board[position]
         if (piece != null) {
-            board[position] = ChessPiece(newType, piece.color)
+            board[position] = piece.copy(type = newType, hasMoved = true)
         }
         return state.copy(
             board = board,
