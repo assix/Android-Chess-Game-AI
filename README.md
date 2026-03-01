@@ -14,6 +14,16 @@
 * **Undo System**: Integrated move-rollback capability with a persistent counter to track your progress.
 * **Tournament Standards**: Full support for complex rules including castling, pawn promotion (Queen, Rook, Bishop, Knight), and stalemate detection.
 
+## 📸 Screenshots
+
+<table style="width:100%">
+  <tr>
+    <th style="text-align:center">Gameplay</th>
+  </tr>
+  <tr>
+    <td><img src="AndroidChessGameAI-screenshot.jpeg" width="300" alt="Gameplay"></td>
+  </tr>
+</table>
 ---
 
 ## 🧠 AI Logic & Algorithm
