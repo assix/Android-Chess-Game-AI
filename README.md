@@ -24,6 +24,7 @@
     <td><img src="AndroidChessGameAI-screenshot.jpeg" width="300" alt="Gameplay"></td>
   </tr>
 </table>
+
 ---
 
 ## 🧠 AI Logic & Algorithm
