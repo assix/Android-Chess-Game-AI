@@ -4,6 +4,38 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+object OpeningBook {
+    fun getOpeningMove(opening: OpeningType, state: GameState): String? {
+        val turnCount = state.moveHistory.size
+        if (turnCount > 12) return null 
+
+        val isWhite = state.turn == PieceColor.WHITE
+        
+        val targetMoves = when (opening) {
+            OpeningType.LONDON_SYSTEM -> if (isWhite) listOf("d2d4", "c1f4", "e2e3", "g1f3", "c2c3", "h2h3", "f1d3") else emptyList()
+            OpeningType.SICILIAN_DEFENSE -> if (!isWhite) listOf("c7c5", "d7d6", "g8f6", "a7a6") else listOf("e2e4", "g1f3", "d2d4", "f1c4")
+            OpeningType.CARO_KANN -> if (!isWhite) listOf("c7c6", "d7d5") else listOf("e2e4", "d2d4")
+            OpeningType.KINGS_INDIAN -> if (!isWhite) listOf("g8f6", "g7g6", "f8g7", "d7d6", "e8g8") else listOf("d2d4", "c2c4", "b1c3", "e2e4")
+            else -> emptyList()
+        }
+
+        val aiHistory = state.moveHistory.filter { it.pieceMoved.color == state.turn }.map { 
+            val fileFrom = ('a' + it.from.col)
+            val rankFrom = 8 - it.from.row
+            val fileTo = ('a' + it.to.col)
+            val rankTo = 8 - it.to.row
+            "$fileFrom$rankFrom$fileTo$rankTo" 
+        }
+
+        for (move in targetMoves) {
+            if (move !in aiHistory) {
+                return move
+            }
+        }
+        return null
+    }
+}
+
 object ChessLogic {
     fun getLegalMoves(position: Position, state: GameState): List<Position> {
         val piece = state.board[position] ?: return emptyList()
@@ -34,7 +66,7 @@ object ChessLogic {
             PieceType.KNIGHT -> validateKnightMove(from, to)
             PieceType.BISHOP -> validateBishopMove(from, to, state)
             PieceType.QUEEN -> validateQueenMove(from, to, state)
-            PieceType.KING -> validateKingMove(from, to)
+            PieceType.KING -> validateKingMove(from, to, piece, state)
         }
     }
 
@@ -119,8 +151,33 @@ object ChessLogic {
         return isPathClear(from, to, state.board)
     }
 
-    private fun validateKingMove(from: Position, to: Position): Boolean {
-        return abs(to.row - from.row) <= 1 && abs(to.col - from.col) <= 1
+    private fun validateKingMove(from: Position, to: Position, piece: ChessPiece, state: GameState): Boolean {
+        val dr = abs(to.row - from.row)
+        val dc = abs(to.col - from.col)
+        if (dr <= 1 && dc <= 1) return true
+
+        if (dr == 0 && dc == 2 && !piece.hasMoved) {
+            if (isKingInCheck(piece.color, state.board)) return false
+            
+            val direction = if (to.col > from.col) 1 else -1
+            val rookCol = if (direction == 1) 7 else 0
+            val rookPos = Position(from.row, rookCol)
+            val rook = state.board[rookPos]
+            
+            if (rook == null || rook.type != PieceType.ROOK || rook.hasMoved) return false
+            
+            var c = from.col + direction
+            while (c != rookCol) {
+                if (state.board[Position(from.row, c)] != null) return false
+                c += direction
+            }
+            
+            val squareCrossed = Position(from.row, from.col + direction)
+            if (isDangerous(squareCrossed, piece.color, state)) return false
+            
+            return true
+        }
+        return false
     }
 
     private fun isPathClear(from: Position, to: Position, board: Map<Position, ChessPiece>): Boolean {
@@ -151,14 +208,34 @@ object ChessLogic {
         }
         return false
     }
+    
+    private fun getOpeningMove(state: GameState): GameState? {
+        if (state.selectedOpening == OpeningType.RANDOM) return null
+        
+        val nextMoveStr = OpeningBook.getOpeningMove(state.selectedOpening, state) ?: return null
+        
+        val from = Position(8 - (nextMoveStr[1] - '0'), nextMoveStr[0] - 'a')
+        val to = Position(8 - (nextMoveStr[3] - '0'), nextMoveStr[2] - 'a')
+        
+        val piece = state.board[from]
+        if (piece != null && piece.color == state.turn) {
+            if (to in getLegalMoves(from, state)) {
+                return movePiece(from, to, state)
+            }
+        }
+        return null
+    }
 
     fun getBestMove(state: GameState): GameState {
         if (isCheckmate(state) || isStalemate(state)) return state
         
+        val bookMove = getOpeningMove(state)
+        if (bookMove != null) return bookMove
+        
         return when (state.difficulty) {
             1 -> makeRandomMove(state) ?: state
             2 -> makeHeuristicMove(state, depth = 1)
-            3 -> makeHeuristicMove(state, depth = 2)
+            3 -> makeHeuristicMove(state, depth = 2) 
             else -> makeRandomMove(state) ?: state
         }
     }
@@ -178,21 +255,32 @@ object ChessLogic {
         val moves = getAllLegalMoves(state).shuffled()
         if (moves.isEmpty()) return state
         
-        var bestVal = Int.MIN_VALUE
+        val isAiWhite = state.turn == PieceColor.WHITE
+        var bestVal = if (isAiWhite) -1000000 else 1000000
         var bestMoveState = moves.first()
 
         for (moveState in moves) {
-            val value = minimax(moveState, depth - 1, Int.MIN_VALUE, Int.MAX_VALUE, false)
-            if (value > bestVal) {
-                bestVal = value
-                bestMoveState = moveState
+            val value = minimax(moveState, depth - 1, -1000000, 1000000, !isAiWhite)
+            
+            if (isAiWhite) {
+                if (value > bestVal) {
+                    bestVal = value
+                    bestMoveState = moveState
+                }
+            } else {
+                if (value < bestVal) {
+                    bestVal = value
+                    bestMoveState = moveState
+                }
             }
         }
         return bestMoveState
     }
 
     private fun minimax(state: GameState, depth: Int, alpha: Int, beta: Int, isMaximizing: Boolean): Int {
-        if (depth == 0 || isCheckmate(state) || isStalemate(state)) return evaluateBoard(state)
+        if (depth == 0 || isCheckmate(state) || isStalemate(state)) {
+            return quiescenceSearch(state, alpha, beta, isMaximizing, 0)
+        }
         
         val moves = getAllLegalMoves(state)
         if (moves.isEmpty()) return evaluateBoard(state)
@@ -201,7 +289,7 @@ object ChessLogic {
         var currentBeta = beta
 
         if (isMaximizing) {
-            var maxEval = Int.MIN_VALUE
+            var maxEval = -1000000
             for (move in moves) {
                 val eval = minimax(move, depth - 1, currentAlpha, currentBeta, false)
                 maxEval = max(maxEval, eval)
@@ -210,7 +298,7 @@ object ChessLogic {
             }
             return maxEval
         } else {
-            var minEval = Int.MAX_VALUE
+            var minEval = 1000000
             for (move in moves) {
                 val eval = minimax(move, depth - 1, currentAlpha, currentBeta, true)
                 minEval = min(minEval, eval)
@@ -219,6 +307,55 @@ object ChessLogic {
             }
             return minEval
         }
+    }
+
+    private fun quiescenceSearch(state: GameState, alpha: Int, beta: Int, isMaximizing: Boolean, qsDepth: Int): Int {
+        val standPat = evaluateBoard(state)
+        if (qsDepth > 3 || isCheckmate(state) || isStalemate(state)) {
+            return standPat
+        }
+
+        var currentAlpha = alpha
+        var currentBeta = beta
+
+        if (isMaximizing) {
+            if (standPat >= currentBeta) return currentBeta
+            if (standPat > currentAlpha) currentAlpha = standPat
+
+            val captures = getAllCaptureMoves(state)
+            for (moveState in captures) {
+                val score = quiescenceSearch(moveState, currentAlpha, currentBeta, false, qsDepth + 1)
+                if (score >= currentBeta) return currentBeta
+                if (score > currentAlpha) currentAlpha = score
+            }
+            return currentAlpha
+        } else {
+            if (standPat <= currentAlpha) return currentAlpha
+            if (standPat < currentBeta) currentBeta = standPat
+
+            val captures = getAllCaptureMoves(state)
+            for (moveState in captures) {
+                val score = quiescenceSearch(moveState, currentAlpha, currentBeta, true, qsDepth + 1)
+                if (score <= currentAlpha) return currentAlpha
+                if (score < currentBeta) currentBeta = score
+            }
+            return currentBeta
+        }
+    }
+
+    private fun getAllCaptureMoves(state: GameState): List<GameState> {
+        val result = mutableListOf<GameState>()
+        val opponentColor = if (state.turn == PieceColor.WHITE) PieceColor.BLACK else PieceColor.WHITE
+        val pieces = state.board.filter { it.value.color == state.turn }
+        for ((pos, _) in pieces) {
+            val moves = getLegalMoves(pos, state)
+            for (to in moves) {
+                if (state.board[to]?.color == opponentColor) {
+                    result.add(movePiece(pos, to, state))
+                }
+            }
+        }
+        return result
     }
 
     private fun getAllLegalMoves(state: GameState): List<GameState> {
@@ -235,26 +372,40 @@ object ChessLogic {
 
     private fun evaluateBoard(state: GameState): Int {
         if (isCheckmate(state)) {
-            return if (state.turn == PieceColor.WHITE) 10000 else -10000
+            return if (state.turn == PieceColor.WHITE) -100000 else 100000
         }
+        if (isStalemate(state)) return 0
+
         var score = 0
         for ((pos, piece) in state.board) {
             var value = when (piece.type) {
-                PieceType.PAWN -> 10
-                PieceType.KNIGHT -> 30
-                PieceType.BISHOP -> 30
-                PieceType.ROOK -> 50
-                PieceType.QUEEN -> 90
-                PieceType.KING -> 900
+                PieceType.PAWN -> 100
+                PieceType.KNIGHT -> 300
+                PieceType.BISHOP -> 300
+                PieceType.ROOK -> 500
+                PieceType.QUEEN -> 900
+                PieceType.KING -> 9000
             }
 
-            if (piece.type == PieceType.QUEEN) {
-                if (isDangerous(pos, piece.color, state)) {
-                    value -= 85 
+            when (state.playStyle) {
+                PlayStyle.AGGRESSIVE -> {
+                    val forwardRank = if (piece.color == PieceColor.WHITE) (7 - pos.row) else pos.row
+                    if (piece.type != PieceType.KING) value += forwardRank * 15
+                }
+                PlayStyle.DEFENSIVE -> {
+                    val backRank = if (piece.color == PieceColor.WHITE) pos.row else (7 - pos.row)
+                    if (piece.type != PieceType.KING) value += backRank * 10
+                }
+                PlayStyle.RANDOM -> {
+                    value += (-10..10).random()
                 }
             }
 
-            if (piece.color == PieceColor.BLACK) score += value else score -= value
+            if (piece.color == PieceColor.WHITE) {
+                score += value
+            } else {
+                score -= value
+            }
         }
         return score
     }
@@ -262,23 +413,36 @@ object ChessLogic {
     fun movePiece(from: Position, to: Position, state: GameState): GameState {
         val board = state.board.toMutableMap()
         val piece = board.remove(from)!!
-        val captured = board.put(to, piece)
+        
+        var isCastlingMove = false
+        if (piece.type == PieceType.KING && abs(to.col - from.col) == 2) {
+            isCastlingMove = true
+            val rookFromCol = if (to.col > from.col) 7 else 0
+            val rookToCol = if (to.col > from.col) to.col - 1 else to.col + 1
+            val rook = board.remove(Position(from.row, rookFromCol))
+            if (rook != null) {
+                board[Position(from.row, rookToCol)] = rook.copy(hasMoved = true)
+            }
+        }
+
+        val movedPiece = piece.copy(hasMoved = true)
+        val captured = board.put(to, movedPiece)
         
         var pendingPromo = state.pendingPromotion
         
-        if (piece.type == PieceType.PAWN) {
-            if ((piece.color == PieceColor.WHITE && to.row == 0) || 
-                (piece.color == PieceColor.BLACK && to.row == 7)) {
+        if (movedPiece.type == PieceType.PAWN) {
+            if ((movedPiece.color == PieceColor.WHITE && to.row == 0) || 
+                (movedPiece.color == PieceColor.BLACK && to.row == 7)) {
                 
-                if (piece.color != state.playerColor) {
-                    board[to] = ChessPiece(PieceType.QUEEN, piece.color)
+                if (movedPiece.color != state.playerColor) {
+                    board[to] = movedPiece.copy(type = PieceType.QUEEN)
                 } else {
                     pendingPromo = to
                 }
             }
         }
 
-        val move = Move(from, to, piece, captured)
+        val move = Move(from = from, to = to, pieceMoved = piece, pieceCaptured = captured, isCastling = isCastlingMove)
         return state.copy(
             board = board,
             turn = if (state.turn == PieceColor.WHITE) PieceColor.BLACK else PieceColor.WHITE,
@@ -295,39 +459,11 @@ object ChessLogic {
         val board = state.board.toMutableMap()
         val piece = board[position]
         if (piece != null) {
-            board[position] = ChessPiece(newType, piece.color)
+            board[position] = piece.copy(type = newType, hasMoved = true)
         }
         return state.copy(
             board = board,
             pendingPromotion = null
         )
-    }
-
-    private fun getAlgebraic(pos: Position): String {
-        val file = ('a' + pos.col)
-        val rank = 8 - pos.row
-        return "$file$rank"
-    }
-
-    fun getOpeningName(history: List<Move>): String {
-        if (history.isEmpty()) return "Starting Position"
-        val sequence = history.joinToString(" ") { getAlgebraic(it.from) + getAlgebraic(it.to) }
-        
-        return when {
-            sequence.startsWith("d2d4 d7d5 c1f4") || sequence.startsWith("d2d4 g8f6 c1f4") -> "London System"
-            sequence.startsWith("d2d4 d7d5 c2c4") -> "Queen's Gambit"
-            sequence.startsWith("d2d4 d7d5") -> "Queen's Pawn Game"
-            sequence.startsWith("d2d4") -> "Queen's Pawn Game"
-            sequence.startsWith("e2e4 c7c5") -> "Sicilian Defense"
-            sequence.startsWith("e2e4 e7e6") -> "French Defense"
-            sequence.startsWith("e2e4 c7c6") -> "Caro-Kann Defense"
-            sequence.startsWith("e2e4 e7e5 g1f3 b8c6 f1b5") -> "Ruy Lopez"
-            sequence.startsWith("e2e4 e7e5 g1f3 b8c6 f1c4") -> "Italian Game"
-            sequence.startsWith("e2e4 e7e5") -> "Open Game"
-            sequence.startsWith("e2e4") -> "King's Pawn Game"
-            sequence.startsWith("c2c4") -> "English Opening"
-            sequence.startsWith("g1f3") -> "Réti Opening"
-            else -> "Unknown / Transposition"
-        }
     }
 }
