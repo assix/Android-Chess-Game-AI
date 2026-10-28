@@ -6,7 +6,8 @@
 
 ## 🚀 Key Features
 
-* **Custom AI Engine**: Features a sophisticated Minimax-based opponent with three distinct difficulty levels: Easy, Medium, and Hard.
+* **Custom AI Engine**: Features a sophisticated Minimax-based opponent with four distinct difficulty levels: Easy, Medium, Hard, and Expert.
+* **Force Capture Mode**: Optional rule (Settings, off by default) that forces the AI to capture whenever a capture is available — "always eat when it can".
 * **Real-Time Opening Recognition**: Automatically identifies and displays classic chess openings as you play, such as the **London System**, **Sicilian Defense**, and **Ruy Lopez**.
 * **Advanced Time Control**: Customizable player timers ranging from 3-minute blitz to 30-minute classical sessions.
 * **Dynamic Help Mode**: Real-time visual indicators highlighting legal moves and identifying dangerous squares under immediate threat.
@@ -34,13 +35,14 @@ The "brain" of Android Chess Game AI is a recursive decision-making engine desig
 
 
 ### The Minimax Algorithm
-The engine utilizes the **Minimax algorithm** with **Alpha-Beta Pruning**. It simulates thousands of potential future board states to a specified depth (e.g., 2-4 plies) and selects the move that maximizes the AI's advantage while assuming the player will make the best possible counter-moves.
+The engine (v0.7) utilizes a **Negamax search** with **Alpha-Beta Pruning**, **MVV-LVA move ordering**, **quiescence search** over captures, **check extensions** (Expert) and **iterative deepening** under per-level time budgets, with mate-distance scoring so faster mates are preferred. Difficulty depths: Easy 1 ply, Medium 2, Hard 3, Expert 4 (+extensions). Easy is calibrated for beginners — real chess with human-like blunders — instead of the old uniformly random moves.
 
 ### Board Evaluation Heuristics
 Each board position is assigned a numerical score based on several factors:
-1.  **Material Value**: Standard piece weighting (Pawn=10, Knight/Bishop=30, Rook=50, Queen=90, King=900).
-2.  **Safety Protocols**: The engine includes "Queen Sacrifice Prevention" logic that heavily penalizes moves leaving the Queen on a square controlled by the opponent.
-3.  **Positioning**: Hard difficulty utilizes deeper look-ahead to prioritize center control and king safety.
+1.  **Material Value**: Standard piece weighting (Pawn=100, Knight=320, Bishop=330, Rook=500, Queen=900, King=20000 centipawns).
+2.  **Piece-Square Tables**: Positional bonuses per piece, with a tapered king table that switches from castled safety in the middlegame to central activity in the endgame.
+3.  **Structure & Safety**: Bishop pair, doubled/isolated/passed pawn terms, rooks on open files, and pawn-shield king safety.
+4.  **Fast Attack Detection**: Checks and attacked squares are computed with direct pawn/knight/king/sliding-ray tests, which is what makes depth 3–4 search fast enough to run on a phone without freezing the UI (search runs on a background thread).
 
 ---
 

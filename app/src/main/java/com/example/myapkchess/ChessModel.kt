@@ -44,6 +44,9 @@ data class GameState(
     val moveHistory: List<Move> = emptyList(),
     val playerColor: PieceColor = PieceColor.WHITE,
     val difficulty: Int = 3,
+    // When true, the AI MUST play a capture whenever one is legally available
+    // ("always eat when it can"). User toggle in Settings, OFF by default.
+    val forceCapture: Boolean = false,
     val isHelpMode: Boolean = false,
     val pendingPromotion: Position? = null,
     val selectedOpening: OpeningType = OpeningType.RANDOM,

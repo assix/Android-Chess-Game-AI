@@ -32,7 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.example.myapkchess.ui.theme.MyApkChessTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,6 +63,7 @@ fun ChessApp() {
     var savedOpening by remember { mutableStateOf(OpeningType.entries.getOrElse(sharedPref.getInt("opening", 0)) { OpeningType.RANDOM }) }
     var savedPlayStyle by remember { mutableStateOf(PlayStyle.entries.getOrElse(sharedPref.getInt("style", 0)) { PlayStyle.RANDOM }) }
     var savedTimeMinutes by remember { mutableStateOf(sharedPref.getInt("time", 10)) }
+    var savedForceCapture by remember { mutableStateOf(sharedPref.getBoolean("forceCapture", false)) }
     var lastPlayerColor by remember { mutableStateOf(PieceColor.BLACK) }
     
     // Stats tracking
@@ -110,12 +113,14 @@ fun ChessApp() {
             initialOpening = savedOpening,
             initialPlayStyle = savedPlayStyle,
             initialTimeMinutes = savedTimeMinutes,
-            onStart = { diff, colorMode, opening, style, timeMins ->
+            initialForceCapture = savedForceCapture,
+            onStart = { diff, colorMode, opening, style, timeMins, forceCapture ->
                 savedDifficulty = diff
                 savedColorMode = colorMode
                 savedOpening = opening
                 savedPlayStyle = style
                 savedTimeMinutes = timeMins
+                savedForceCapture = forceCapture
                 
                 val playerColor = when (colorMode) {
                     ColorSelectionMode.WHITE -> PieceColor.WHITE
@@ -130,7 +135,8 @@ fun ChessApp() {
                     playerColor = playerColor,
                     selectedOpening = opening,
                     playStyle = style,
-                    turn = PieceColor.WHITE 
+                    forceCapture = forceCapture,
+                    turn = PieceColor.WHITE
                 )
                 
                 playerTimeSeconds = timeMins * 60
@@ -143,6 +149,7 @@ fun ChessApp() {
                     .putInt("opening", opening.ordinal)
                     .putInt("style", style.ordinal)
                     .putInt("time", timeMins)
+                    .putBoolean("forceCapture", forceCapture)
                     .putInt("totalGames", totalGames)
                     .apply()
                 
@@ -161,7 +168,15 @@ fun ChessApp() {
             totalLosses = totalLosses,
             totalSeconds = totalSeconds,
             onDismiss = { showSettings = false },
-            onUpdate = { gameState = it }
+            onUpdate = { newState ->
+                gameState = newState
+                savedDifficulty = newState.difficulty
+                savedForceCapture = newState.forceCapture
+                sharedPref.edit()
+                    .putInt("diff", newState.difficulty)
+                    .putBoolean("forceCapture", newState.forceCapture)
+                    .apply()
+            }
         )
     }
 
@@ -289,7 +304,15 @@ fun ChessApp() {
     LaunchedEffect(gameState.turn, gameState.playerColor, gameState.pendingPromotion, isGameOver) {
         if (gameState.turn != gameState.playerColor && !isGameOver && gameState.pendingPromotion == null) {
             delay(500)
-            gameState = ChessLogic.getBestMove(gameState)
+            // Engine search runs off the UI thread so Hard/Expert thinking
+            // can never freeze the board.
+            val stateForAi = gameState
+            val aiMove = withContext(Dispatchers.Default) { ChessLogic.getBestMove(stateForAi) }
+            // Only apply if nothing changed while the engine was thinking
+            // (e.g. the user hit Reset or Undo in the meantime).
+            if (gameState.moveHistory.size == stateForAi.moveHistory.size && gameState.turn == stateForAi.turn) {
+                gameState = aiMove
+            }
         }
     }
 }
@@ -452,14 +475,15 @@ fun PromotionDialog(color: PieceColor, onSelect: (PieceType) -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StartDialog(
-    initialDiff: Int, initialColorMode: ColorSelectionMode, initialOpening: OpeningType, initialPlayStyle: PlayStyle, initialTimeMinutes: Int,
-    onStart: (Int, ColorSelectionMode, OpeningType, PlayStyle, Int) -> Unit
+    initialDiff: Int, initialColorMode: ColorSelectionMode, initialOpening: OpeningType, initialPlayStyle: PlayStyle, initialTimeMinutes: Int, initialForceCapture: Boolean,
+    onStart: (Int, ColorSelectionMode, OpeningType, PlayStyle, Int, Boolean) -> Unit
 ) {
     var diff by remember { mutableStateOf(initialDiff) }
     var colorMode by remember { mutableStateOf(initialColorMode) }
     var opening by remember { mutableStateOf(initialOpening) }
     var playStyle by remember { mutableStateOf(initialPlayStyle) }
     var timeMins by remember { mutableStateOf(initialTimeMinutes) }
+    var forceCapture by remember { mutableStateOf(initialForceCapture) }
 
     AlertDialog(
         onDismissRequest = {},
@@ -470,9 +494,17 @@ fun StartDialog(
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(1, 2, 3).forEach { d ->
-                        FilterChip(modifier = Modifier.weight(1f), selected = diff == d, onClick = { diff = d }, label = { Text(getDifficultyName(d), fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) })
+                    listOf(1, 2, 3, 4).forEach { d ->
+                        FilterChip(modifier = Modifier.weight(1f), selected = diff == d, onClick = { diff = d }, label = { Text(getDifficultyName(d), fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 1, softWrap = false, modifier = Modifier.fillMaxWidth()) })
                     }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("AI must capture when possible", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Force the opponent to eat whenever a capture is available", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = forceCapture, onCheckedChange = { forceCapture = it })
                 }
                 
                 Text("AI Play Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
@@ -504,7 +536,7 @@ fun StartDialog(
                 }
             }
         },
-        confirmButton = { Button(onClick = { onStart(diff, colorMode, opening, playStyle, timeMins) }) { Text("Start Game") } }
+        confirmButton = { Button(onClick = { onStart(diff, colorMode, opening, playStyle, timeMins, forceCapture) }) { Text("Start Game") } }
     )
 }
 
@@ -522,6 +554,21 @@ fun SettingsDialog(currentGameState: GameState, totalGames: Int, totalWins: Int,
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Help Mode Indicators")
                     Switch(checked = currentGameState.isHelpMode, onCheckedChange = { onUpdate(currentGameState.copy(isHelpMode = it)) })
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("AI must capture when possible")
+                        Text("Opponent always eats when a capture is available", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = currentGameState.forceCapture, onCheckedChange = { onUpdate(currentGameState.copy(forceCapture = it)) })
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(1, 2, 3, 4).forEach { d ->
+                        FilterChip(modifier = Modifier.weight(1f), selected = currentGameState.difficulty == d, onClick = { onUpdate(currentGameState.copy(difficulty = d)) }, label = { Text(getDifficultyName(d), fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 1, softWrap = false, modifier = Modifier.fillMaxWidth()) })
+                    }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 HorizontalDivider()
@@ -563,7 +610,7 @@ fun undoMove(state: GameState): GameState {
     return state.copy(board = newBoard, turn = lastMove.pieceMoved.color, moveHistory = state.moveHistory.dropLast(1), pendingPromotion = null)
 }
 
-fun getDifficultyName(level: Int) = when(level) { 1 -> "Easy"; 2 -> "Medium"; 3 -> "Hard"; else -> "Unknown" }
+fun getDifficultyName(level: Int) = when(level) { 1 -> "Easy"; 2 -> "Medium"; 3 -> "Hard"; 4 -> "Expert"; else -> "Unknown" }
 
 @Composable
 fun PieceIcon(piece: ChessPiece, fontSize: TextUnit) {
