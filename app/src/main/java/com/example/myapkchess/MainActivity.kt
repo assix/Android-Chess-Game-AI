@@ -39,6 +39,9 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Stockfish lives in the app's native library directory (extracted
+        // there by Android because it ships as libstockfish.so in jniLibs).
+        StockfishEngine.init(java.io.File(applicationInfo.nativeLibraryDir, "libstockfish.so").absolutePath)
         enableEdgeToEdge()
         setContent {
             MyApkChessTheme {
@@ -64,6 +67,8 @@ fun ChessApp() {
     var savedPlayStyle by remember { mutableStateOf(PlayStyle.entries.getOrElse(sharedPref.getInt("style", 0)) { PlayStyle.RANDOM }) }
     var savedTimeMinutes by remember { mutableStateOf(sharedPref.getInt("time", 10)) }
     var savedForceCapture by remember { mutableStateOf(sharedPref.getBoolean("forceCapture", false)) }
+    var savedKoth by remember { mutableStateOf(sharedPref.getBoolean("kingOfTheHill", false)) }
+    var savedKothStance by remember { mutableStateOf(KothStance.entries.getOrElse(sharedPref.getInt("kothStance", 0)) { KothStance.OFFENSIVE }) }
     var lastPlayerColor by remember { mutableStateOf(PieceColor.BLACK) }
     
     // Stats tracking
@@ -82,13 +87,19 @@ fun ChessApp() {
     var playerTimeSeconds by remember { mutableStateOf(600) }
 
     val isTimeOut = playerTimeSeconds <= 0
-    val isGameOver = ChessLogic.isCheckmate(gameState) || ChessLogic.isStalemate(gameState) || isTimeOut
+    val isGameOver = ChessLogic.isCheckmate(gameState) || ChessLogic.isStalemate(gameState) || ChessLogic.isKingOfTheHillWin(gameState) || isTimeOut
 
     // Handle Win/Loss tracking
     LaunchedEffect(isGameOver) {
         if (isGameOver && !isOutcomeRecorded && !showStartDialog) {
             if (isTimeOut) {
                 totalLosses++
+            } else if (ChessLogic.hillWinner(gameState) != null) {
+                if (ChessLogic.hillWinner(gameState) == gameState.playerColor) {
+                    totalWins++ // Player reached the hill
+                } else {
+                    totalLosses++ // AI reached the hill
+                }
             } else if (ChessLogic.isCheckmate(gameState)) {
                 if (gameState.turn == gameState.playerColor) {
                     totalLosses++ // Player got checkmated
@@ -114,14 +125,18 @@ fun ChessApp() {
             initialPlayStyle = savedPlayStyle,
             initialTimeMinutes = savedTimeMinutes,
             initialForceCapture = savedForceCapture,
-            onStart = { diff, colorMode, opening, style, timeMins, forceCapture ->
+            initialKoth = savedKoth,
+            initialKothStance = savedKothStance,
+            onStart = { diff, colorMode, opening, style, timeMins, forceCapture, koth, kothStance ->
                 savedDifficulty = diff
                 savedColorMode = colorMode
                 savedOpening = opening
                 savedPlayStyle = style
                 savedTimeMinutes = timeMins
                 savedForceCapture = forceCapture
-                
+                savedKoth = koth
+                savedKothStance = kothStance
+
                 val playerColor = when (colorMode) {
                     ColorSelectionMode.WHITE -> PieceColor.WHITE
                     ColorSelectionMode.BLACK -> PieceColor.BLACK
@@ -136,6 +151,8 @@ fun ChessApp() {
                     selectedOpening = opening,
                     playStyle = style,
                     forceCapture = forceCapture,
+                    kingOfTheHill = koth,
+                    kothStance = kothStance,
                     turn = PieceColor.WHITE
                 )
                 
@@ -150,6 +167,8 @@ fun ChessApp() {
                     .putInt("style", style.ordinal)
                     .putInt("time", timeMins)
                     .putBoolean("forceCapture", forceCapture)
+                    .putBoolean("kingOfTheHill", koth)
+                    .putInt("kothStance", kothStance.ordinal)
                     .putInt("totalGames", totalGames)
                     .apply()
                 
@@ -172,9 +191,13 @@ fun ChessApp() {
                 gameState = newState
                 savedDifficulty = newState.difficulty
                 savedForceCapture = newState.forceCapture
+                savedKoth = newState.kingOfTheHill
+                savedKothStance = newState.kothStance
                 sharedPref.edit()
                     .putInt("diff", newState.difficulty)
                     .putBoolean("forceCapture", newState.forceCapture)
+                    .putBoolean("kingOfTheHill", newState.kingOfTheHill)
+                    .putInt("kothStance", newState.kothStance.ordinal)
                     .apply()
             }
         )
@@ -307,7 +330,11 @@ fun ChessApp() {
             // Engine search runs off the UI thread so Hard/Expert thinking
             // can never freeze the board.
             val stateForAi = gameState
-            val aiMove = withContext(Dispatchers.Default) { ChessLogic.getBestMove(stateForAi) }
+            val aiMove = withContext(Dispatchers.Default) {
+                // Stockfish 19 is the primary brain; the built-in Kotlin
+                // engine covers any failure to start or run it.
+                StockfishEngine.getBestMove(stateForAi) ?: ChessLogic.getBestMove(stateForAi)
+            }
             // Only apply if nothing changed while the engine was thinking
             // (e.g. the user hit Reset or Undo in the meantime).
             if (gameState.moveHistory.size == stateForAi.moveHistory.size && gameState.turn == stateForAi.turn) {
@@ -321,6 +348,8 @@ fun ChessApp() {
 fun GameStatusInfo(gameState: GameState, playerTimeSeconds: Int, isGameOver: Boolean, undoCount: Int) {
     val statusText = when {
         playerTimeSeconds <= 0 -> "Time's up! AI Wins."
+        ChessLogic.hillWinner(gameState) == gameState.playerColor -> "King of the Hill! You Win!"
+        ChessLogic.hillWinner(gameState) != null -> "King of the Hill! AI Wins!"
         ChessLogic.isCheckmate(gameState) -> "Checkmate!"
         ChessLogic.isStalemate(gameState) -> "Stalemate!"
         gameState.turn == gameState.playerColor -> "Your Turn"
@@ -411,7 +440,8 @@ fun MainBoard(gameState: GameState, selectedPosition: Position?, isGameOver: Boo
                         val isSelected = pos == selectedPosition
                         val isPossibleMove = pos in possibleMoves
                         val isLightSquare = (row + col) % 2 == 0
-                        val bgColor = if (isLightSquare) Color(0xFFF0D9B5) else Color(0xFFB58863)
+                        val bgColor = if (gameState.kingOfTheHill && pos in ChessLogic.HILL_SQUARES) Color(0xFFE3B505)
+                            else if (isLightSquare) Color(0xFFF0D9B5) else Color(0xFFB58863)
                         
                         Box(
                             modifier = Modifier.weight(1f).fillMaxHeight().background(bgColor).clickable { onSquareClick(pos) },
@@ -476,7 +506,8 @@ fun PromotionDialog(color: PieceColor, onSelect: (PieceType) -> Unit) {
 @Composable
 fun StartDialog(
     initialDiff: Int, initialColorMode: ColorSelectionMode, initialOpening: OpeningType, initialPlayStyle: PlayStyle, initialTimeMinutes: Int, initialForceCapture: Boolean,
-    onStart: (Int, ColorSelectionMode, OpeningType, PlayStyle, Int, Boolean) -> Unit
+    initialKoth: Boolean, initialKothStance: KothStance,
+    onStart: (Int, ColorSelectionMode, OpeningType, PlayStyle, Int, Boolean, Boolean, KothStance) -> Unit
 ) {
     var diff by remember { mutableStateOf(initialDiff) }
     var colorMode by remember { mutableStateOf(initialColorMode) }
@@ -484,6 +515,8 @@ fun StartDialog(
     var playStyle by remember { mutableStateOf(initialPlayStyle) }
     var timeMins by remember { mutableStateOf(initialTimeMinutes) }
     var forceCapture by remember { mutableStateOf(initialForceCapture) }
+    var koth by remember { mutableStateOf(initialKoth) }
+    var kothStance by remember { mutableStateOf(initialKothStance) }
 
     AlertDialog(
         onDismissRequest = {},
@@ -501,12 +534,27 @@ fun StartDialog(
 
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("AI must capture when possible", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Force the opponent to eat whenever a capture is available", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Force AI to capture when possible", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                     Switch(checked = forceCapture, onCheckedChange = { forceCapture = it })
                 }
-                
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("King of the Hill", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                    Switch(checked = koth, onCheckedChange = { koth = it })
+                }
+
+                if (koth) {
+                    Text("AI King of the Hill Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        KothStance.entries.forEach { stance ->
+                            FilterChip(modifier = Modifier.weight(1f), selected = kothStance == stance, onClick = { kothStance = stance }, label = { Text(stance.displayName, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) })
+                        }
+                    }
+                }
+
                 Text("AI Play Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     PlayStyle.entries.forEach { style ->
@@ -536,7 +584,7 @@ fun StartDialog(
                 }
             }
         },
-        confirmButton = { Button(onClick = { onStart(diff, colorMode, opening, playStyle, timeMins, forceCapture) }) { Text("Start Game") } }
+        confirmButton = { Button(onClick = { onStart(diff, colorMode, opening, playStyle, timeMins, forceCapture, koth, kothStance) }) { Text("Start Game") } }
     )
 }
 
@@ -558,10 +606,23 @@ fun SettingsDialog(currentGameState: GameState, totalGames: Int, totalWins: Int,
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("AI must capture when possible")
-                        Text("Opponent always eats when a capture is available", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Force AI to capture when possible")
                     }
                     Switch(checked = currentGameState.forceCapture, onCheckedChange = { onUpdate(currentGameState.copy(forceCapture = it)) })
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("King of the Hill")
+                    Switch(checked = currentGameState.kingOfTheHill, onCheckedChange = { onUpdate(currentGameState.copy(kingOfTheHill = it)) })
+                }
+                if (currentGameState.kingOfTheHill) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("AI King of the Hill Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        KothStance.entries.forEach { stance ->
+                            FilterChip(modifier = Modifier.weight(1f), selected = currentGameState.kothStance == stance, onClick = { onUpdate(currentGameState.copy(kothStance = stance)) }, label = { Text(stance.displayName, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) })
+                        }
+                    }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))

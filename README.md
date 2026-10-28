@@ -1,13 +1,22 @@
 # Android Chess Game AI
 
-**Android Chess Game AI** is a high-performance, native Android chess application built with **Kotlin** and **Jetpack Compose**. It features a custom-built AI engine optimized for mobile devices, offering a fluid and challenging experience for players of all levels.
+**Android Chess Game AI** is a high-performance, native Android chess application built with **Kotlin** and **Jetpack Compose**. Since v0.8 it is powered by **Stockfish 19**, the strongest open-source chess engine in the world, offering a fluid and challenging experience for players of all levels.
+
+---
+
+## 🆕 What's new in v0.8 — the Stockfish upgrade
+
+* **New algorithm: Stockfish 19 replaces the home-grown minimax as the primary engine.** The previous custom Negamax engine had a root-search flaw that could make it misevaluate candidate moves — at Medium it sometimes skipped a free capture or left a piece hanging. v0.8 embeds the official Stockfish 19 binary (ARM64) and drives it over UCI: positions are translated to FEN under this app's exact ruleset (castling supported, no en passant), and every Stockfish reply is validated against the app's own legal-move generator before being played. Difficulty is now Stockfish's own Skill Level (Easy 5 · Medium 11 · Hard 17 · Expert 20). The built-in engine is still there as an automatic fallback — with the root-search flaw fixed — in case the Stockfish process can't run.
+* **King of the Hill variant** (new toggle): win by checkmate or by moving your king onto d4, e4, d5 or e5. Pick the AI's stance, **Offensive** or **Defensive**. Stockfish doesn't natively know this variant, so a variant layer around the engine enforces it.
+* **"Force AI to capture when possible"** toggle (renamed in v0.7) keeps working under Stockfish via UCI `searchmoves`.
 
 ---
 
 ## 🚀 Key Features
 
-* **Custom AI Engine**: Features a sophisticated Minimax-based opponent with four distinct difficulty levels: Easy, Medium, Hard, and Expert.
-* **Force Capture Mode**: Optional rule (Settings, off by default) that forces the AI to capture whenever a capture is available — "always eat when it can".
+* **Stockfish 19 Engine**: Since v0.8 the opponent is the real **Stockfish 19** (bundled binary, UCI), with four difficulty levels mapped to Stockfish Skill Levels: Easy 5, Medium 11, Hard 17, Expert 20. The built-in Kotlin engine remains as an automatic fallback. See `STOCKFISH.md` for details and licensing.
+* **Force AI to capture when possible**: Optional rule (Settings, off by default) that forces the AI to capture whenever a capture is available — "always eat when it can".
+* **King of the Hill variant**: Optional variant (New Game / Settings, off by default): win by checkmate OR by legally moving your king onto one of the four central squares (d4, e4, d5, e5), which are highlighted gold. Choose the AI's approach — **Offensive** (it races its own king to the hill) or **Defensive** (it prioritises keeping your king away). Either way, the AI takes a hill win the moment one exists and never allows you an immediate hill win when it can be prevented. Official Stockfish doesn't know this variant, so `StockfishEngine.kt` enforces it around the engine (legal-move pool filtering + stance tie-breaking over Stockfish's MultiPV ranking); the built-in fallback engine has the same rules baked into its search.
 * **Real-Time Opening Recognition**: Automatically identifies and displays classic chess openings as you play, such as the **London System**, **Sicilian Defense**, and **Ruy Lopez**.
 * **Advanced Time Control**: Customizable player timers ranging from 3-minute blitz to 30-minute classical sessions.
 * **Dynamic Help Mode**: Real-time visual indicators highlighting legal moves and identifying dangerous squares under immediate threat.
@@ -30,7 +39,9 @@
 
 ## 🧠 AI Logic & Algorithm
 
-The "brain" of Android Chess Game AI is a recursive decision-making engine designed for efficiency and tactical depth.
+Since v0.8 the "brain" is **Stockfish 19**, the strongest open-source chess engine, bundled as a native binary and driven over UCI by `StockfishEngine.kt`. Positions are translated to FEN under this app's exact ruleset (castling yes, en passant no), and Stockfish's replies are validated against the app's own move generator before being played. Difficulty maps to Stockfish Skill Levels (5 / 11 / 17 / 20).
+
+The original recursive decision-making engine below is still in the app as the built-in fallback (`ChessLogic.kt`), used automatically if the Stockfish process can't run.
 
 
 

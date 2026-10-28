@@ -104,6 +104,42 @@ object ChessLogic {
         return !hasAnyLegalMoves(state)
     }
 
+    // --------------------- King of the Hill variant ---------------------
+
+    /** The four hill squares: d5, e5, d4, e4 in (row, col) board coords. */
+    val HILL_SQUARES: Set<Position> = setOf(
+        Position(3, 3), Position(3, 4), Position(4, 3), Position(4, 4)
+    )
+
+    fun kingOf(board: Map<Position, ChessPiece>, color: PieceColor): Position? =
+        board.entries.firstOrNull { it.value.type == PieceType.KING && it.value.color == color }?.key
+
+    /** Chebyshev distance from [pos] to the nearest hill square (0 = on the hill). */
+    fun hillDistance(pos: Position): Int =
+        HILL_SQUARES.minOf { max(abs(pos.row - it.row), abs(pos.col - it.col)) }
+
+    /**
+     * In a KOTH game, the color whose king stands on a hill square, or null.
+     * The game ends the moment a king legally moves there, so at most one
+     * king can be on the hill in any position the UI can show.
+     */
+    fun hillWinner(state: GameState): PieceColor? {
+        if (!state.kingOfTheHill) return null
+        for ((pos, piece) in state.board) {
+            if (piece.type == PieceType.KING && pos in HILL_SQUARES) return piece.color
+        }
+        return null
+    }
+
+    fun isKingOfTheHillWin(state: GameState): Boolean = hillWinner(state) != null
+
+    /** True if the side to move in [state] has a legal king move onto the hill. */
+    fun sideToMoveHasHillWin(state: GameState): Boolean {
+        if (!state.kingOfTheHill) return false
+        val king = kingOf(state.board, state.turn) ?: return false
+        return getLegalMoves(king, state).any { it in HILL_SQUARES }
+    }
+
     /** Is [position] attacked by the opponent of [color]? Used by Help mode. */
     fun isDangerous(position: Position, color: PieceColor, state: GameState): Boolean {
         val opponentColor = if (color == PieceColor.WHITE) PieceColor.BLACK else PieceColor.WHITE
@@ -546,7 +582,28 @@ object ChessLogic {
             score += kingShieldScore(state, whiteKing, PieceColor.WHITE)
             score -= kingShieldScore(state, blackKing, PieceColor.BLACK)
         }
+        if (state.kingOfTheHill) {
+            score += kothScore(state, whiteKing, blackKing)
+        }
         return score
+    }
+
+    /**
+     * KOTH evaluation term (White's perspective): rewards the AI's king for
+     * approaching the hill and penalises the human's king for approaching
+     * it, weighted by the chosen stance. The actual hill occupation is a
+     * terminal score in the search, not an eval term.
+     */
+    private fun kothScore(state: GameState, whiteKing: Position?, blackKing: Position?): Int {
+        if (whiteKing == null || blackKing == null) return 0
+        fun proximity(k: Position) = (3 - hillDistance(k)).coerceAtLeast(0) // 0 far .. 3 adjacent
+        val aiIsWhite = state.playerColor == PieceColor.BLACK
+        val aiProx = proximity(if (aiIsWhite) whiteKing else blackKing)
+        val humanProx = proximity(if (aiIsWhite) blackKing else whiteKing)
+        val ownWeight = if (state.kothStance == KothStance.OFFENSIVE) 45 else 15
+        val denyWeight = if (state.kothStance == KothStance.DEFENSIVE) 60 else 25
+        val aiPerspective = aiProx * ownWeight - humanProx * denyWeight
+        return if (aiIsWhite) aiPerspective else -aiPerspective
     }
 
     /** Pawn-structure terms for one side, returned as a positive bonus. */
@@ -708,6 +765,13 @@ object ChessLogic {
     private fun negamax(state: GameState, depth: Int, alphaIn: Int, beta: Int, ply: Int): Int {
         nodes++
         checkClock()
+        if (state.kingOfTheHill) {
+            // The game ended the moment a king reached the hill, so only
+            // the side that just moved (not the side to move) can be on it.
+            val justMoved = if (state.turn == PieceColor.WHITE) PieceColor.BLACK else PieceColor.WHITE
+            val king = kingOf(state.board, justMoved)
+            if (king != null && king in HILL_SQUARES) return -MATE + ply
+        }
         if (depth <= 0) {
             return if (activeConfig.useQuiescence) quiescence(state, alphaIn, beta, ply, 0)
             else evaluateForSideToMove(state)
@@ -737,6 +801,11 @@ object ChessLogic {
     private fun quiescence(state: GameState, alphaIn: Int, beta: Int, ply: Int, qDepth: Int): Int {
         nodes++
         checkClock()
+        if (state.kingOfTheHill) {
+            val justMoved = if (state.turn == PieceColor.WHITE) PieceColor.BLACK else PieceColor.WHITE
+            val king = kingOf(state.board, justMoved)
+            if (king != null && king in HILL_SQUARES) return -MATE + ply
+        }
         val standPat = evaluateForSideToMove(state)
         if (qDepth >= 6) return standPat
         if (standPat >= beta) return standPat
@@ -762,7 +831,11 @@ object ChessLogic {
         val scored = mutableListOf<Pair<GameState, Int>>()
         var alpha = -INF
         for (move in candidates) {
-            val score = -negamax(move.result, depth - 1, -INF, -alpha.coerceAtLeast(-INF), 1)
+            // Full window for every root move. (v0.7 searched later moves
+            // through a narrowed window without re-searching, which handed
+            // them inflated "almost best" scores; at the root flavours that
+            // made Medium skip free captures and hang pieces.)
+            val score = -negamax(move.result, depth - 1, -INF, INF, 1)
             scored.add(move.result to score)
             if (score > alpha) alpha = score
         }
@@ -778,13 +851,24 @@ object ChessLogic {
         if (allMoves.isEmpty()) return state
         val captures = allMoves.filter { it.isCapture }
         val mustCapture = state.forceCapture && captures.isNotEmpty()
-        val candidates = if (mustCapture) captures else allMoves
+        var candidates = if (mustCapture) captures else allMoves
 
         // Opening book (skipped if it would break the force-capture rule).
         val bookMove = getOpeningMove(state)
         if (bookMove != null) {
             val bookIsCapture = bookMove.moveHistory.lastOrNull()?.pieceCaptured != null
             if (!mustCapture || bookIsCapture) return bookMove
+        }
+
+        if (state.kingOfTheHill) {
+            // Take an immediate hill win at every level (difficulty flavour
+            // must never talk the engine out of winning the game)...
+            val hillWin = candidates.firstOrNull { hillWinner(it.result) == state.turn }
+            if (hillWin != null) return hillWin.result
+            // ...and never hand the opponent an immediate hill win when
+            // any alternative exists, whatever the stance.
+            val safe = candidates.filter { !sideToMoveHasHillWin(it.result) }
+            if (safe.isNotEmpty()) candidates = safe
         }
 
         val config = levelConfig(state.difficulty)

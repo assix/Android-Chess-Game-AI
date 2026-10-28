@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.myapkchess"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.7"
+        versionCode = 3
+        versionName = "0.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -31,6 +31,14 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+    // Stockfish ships as a "native library" (libstockfish.so) so Android
+    // extracts it to the executable nativeLibraryDir; legacy packaging is
+    // what guarantees it lands on disk as a runnable file.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
     buildFeatures {
         compose = true

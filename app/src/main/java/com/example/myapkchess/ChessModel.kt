@@ -24,6 +24,11 @@ data class Move(
     val isCastling: Boolean = false
 )
 
+enum class KothStance(val displayName: String) {
+    OFFENSIVE("Offensive"),
+    DEFENSIVE("Defensive")
+}
+
 enum class PlayStyle(val displayName: String) {
     RANDOM("Random"),
     DEFENSIVE("Defensive"),
@@ -47,6 +52,13 @@ data class GameState(
     // When true, the AI MUST play a capture whenever one is legally available
     // ("always eat when it can"). User toggle in Settings, OFF by default.
     val forceCapture: Boolean = false,
+    // King of the Hill variant: a side also wins by legally moving its king
+    // onto one of the four central squares (d4, e4, d5, e5).
+    val kingOfTheHill: Boolean = false,
+    // How the AI approaches KOTH: OFFENSIVE hunts the hill itself,
+    // DEFENSIVE prioritises keeping the player's king away from it.
+    // (Denying an immediate hill win is a hard rule in both stances.)
+    val kothStance: KothStance = KothStance.OFFENSIVE,
     val isHelpMode: Boolean = false,
     val pendingPromotion: Position? = null,
     val selectedOpening: OpeningType = OpeningType.RANDOM,
