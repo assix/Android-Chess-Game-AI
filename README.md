@@ -6,7 +6,7 @@
 
 ## 🆕 What's new in v0.8 — the Stockfish upgrade
 
-* **New algorithm: Stockfish 19 replaces the home-grown minimax as the primary engine.** The previous custom Negamax engine had a root-search flaw that could make it misevaluate candidate moves — at Medium it sometimes skipped a free capture or left a piece hanging. v0.8 embeds the official Stockfish 19 binary (ARM64) and drives it over UCI: positions are translated to FEN under this app's exact ruleset (castling supported, no en passant), and every Stockfish reply is validated against the app's own legal-move generator before being played. Difficulty is now Stockfish's own Skill Level (Easy 5 · Medium 11 · Hard 17 · Expert 20). The built-in engine is still there as an automatic fallback — with the root-search flaw fixed — in case the Stockfish process can't run.
+* **New algorithm: Stockfish 19 replaces the previous custom-built engine as the primary brain.** The old engine had a root-search flaw that could make it misevaluate candidate moves — at Medium it sometimes skipped a free capture or left a piece hanging. v0.8 embeds the official Stockfish 19 binary (ARM64) and drives it over UCI: positions are translated to FEN under this app's exact ruleset (castling supported, no en passant), and every Stockfish reply is validated against the app's own legal-move generator before being played. Difficulty is now Stockfish's own Skill Level (Easy 5 · Medium 11 · Hard 17 · Expert 20). The built-in engine is still there as an automatic fallback — with the root-search flaw fixed — in case the Stockfish process can't run.
 * **King of the Hill variant** (new toggle): win by checkmate or by moving your king onto d4, e4, d5 or e5. Pick the AI's stance, **Offensive** or **Defensive**. Stockfish doesn't natively know this variant, so a variant layer around the engine enforces it.
 * **"Force AI to capture when possible"** toggle (renamed in v0.7) keeps working under Stockfish via UCI `searchmoves`.
 
@@ -39,21 +39,29 @@
 
 ## 🧠 AI Logic & Algorithm
 
-Since v0.8 the "brain" is **Stockfish 19**, the strongest open-source chess engine, bundled as a native binary and driven over UCI by `StockfishEngine.kt`. Positions are translated to FEN under this app's exact ruleset (castling yes, en passant no), and Stockfish's replies are validated against the app's own move generator before being played. Difficulty maps to Stockfish Skill Levels (5 / 11 / 17 / 20).
+The "brain" of Android Chess Game AI is **Stockfish 19**, the strongest open-source chess engine in the world, bundled as a native ARM64 binary and driven over the UCI protocol by `StockfishEngine.kt`.
 
-The original recursive decision-making engine below is still in the app as the built-in fallback (`ChessLogic.kt`), used automatically if the Stockfish process can't run.
+### How Stockfish is integrated
+* **Position translation**: the app's board is converted to FEN under this app's exact ruleset — castling rights are derived from each piece's moved state, and the en passant field is always `-` because this app's rules don't include en passant.
+* **Move validation**: every move Stockfish returns is checked against the app's own legal-move generator before it is played, so the app's rules are always the source of truth.
+* **Process model**: Stockfish runs as a separate process (it ships as `libstockfish.so` in `jniLibs`, the standard way to get an executable binary onto Android) and thinks on a background thread, so the board never freezes.
+* **Fallback**: a lightweight built-in engine remains in the app and takes over automatically if the Stockfish process can't start — you'll never be left without an opponent.
 
+### Difficulty levels
+Difficulty is Stockfish's own **Skill Level** setting, with per-level thinking-time budgets:
 
+| Level | Stockfish Skill | Thinking time |
+|-------|----------------|---------------|
+| Easy | 5 | ~0.3 s |
+| Medium | 11 | ~0.6 s |
+| Hard | 17 | ~1.2 s |
+| Expert | 20 (full strength) | ~2.5 s |
 
-### The Minimax Algorithm
-The engine (v0.7) utilizes a **Negamax search** with **Alpha-Beta Pruning**, **MVV-LVA move ordering**, **quiescence search** over captures, **check extensions** (Expert) and **iterative deepening** under per-level time budgets, with mate-distance scoring so faster mates are preferred. Difficulty depths: Easy 1 ply, Medium 2, Hard 3, Expert 4 (+extensions). Easy is calibrated for beginners — real chess with human-like blunders — instead of the old uniformly random moves.
+### King of the Hill support
+Official Stockfish only plays standard chess, so the King of the Hill variant is enforced by a layer around the engine (`StockfishEngine.kt`): an immediate hill win is played at once, any move that would hand the player an immediate hill win is filtered out of Stockfish's candidate pool, and the chosen **Offensive/Defensive** stance breaks ties in Stockfish's MultiPV ranking — Offensive favouring the move that brings the AI's king closest to the hill, Defensive the move that leaves the player's king farthest from it.
 
-### Board Evaluation Heuristics
-Each board position is assigned a numerical score based on several factors:
-1.  **Material Value**: Standard piece weighting (Pawn=100, Knight=320, Bishop=330, Rook=500, Queen=900, King=20000 centipawns).
-2.  **Piece-Square Tables**: Positional bonuses per piece, with a tapered king table that switches from castled safety in the middlegame to central activity in the endgame.
-3.  **Structure & Safety**: Bishop pair, doubled/isolated/passed pawn terms, rooks on open files, and pawn-shield king safety.
-4.  **Fast Attack Detection**: Checks and attacked squares are computed with direct pawn/knight/king/sliding-ray tests, which is what makes depth 3–4 search fast enough to run on a phone without freezing the UI (search runs on a background thread).
+### Force capture
+With **"Force AI to capture when possible"** enabled, Stockfish is restricted via UCI `searchmoves` to the app's legal captures, so the rule holds exactly.
 
 ---
 

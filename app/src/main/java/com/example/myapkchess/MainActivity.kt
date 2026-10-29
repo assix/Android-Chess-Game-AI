@@ -32,9 +32,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import com.example.myapkchess.ui.theme.MyApkChessTheme
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -517,6 +520,7 @@ fun StartDialog(
     var forceCapture by remember { mutableStateOf(initialForceCapture) }
     var koth by remember { mutableStateOf(initialKoth) }
     var kothStance by remember { mutableStateOf(initialKothStance) }
+    val configuration = LocalConfiguration.current
 
     AlertDialog(
         onDismissRequest = {},
@@ -524,7 +528,10 @@ fun StartDialog(
         modifier = Modifier.fillMaxWidth(0.98f).padding(horizontal = 8.dp),
         title = { Text("New Game Setup") },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            // Cap the scrollable content height: without a cap the dialog
+            // grows past the screen when the KOTH options expand, pushing
+            // the Start Game button behind the system navigation bar.
+            Column(modifier = Modifier.heightIn(max = (configuration.screenHeightDp * 0.60f).dp).verticalScroll(rememberScrollState())) {
                 Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(1, 2, 3, 4).forEach { d ->
@@ -591,6 +598,14 @@ fun StartDialog(
 @Composable
 fun SettingsDialog(currentGameState: GameState, totalGames: Int, totalWins: Int, totalLosses: Int, totalSeconds: Long, onDismiss: () -> Unit, onUpdate: (GameState) -> Unit) {
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf<String?>(null) }
+    var availableUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
+    val currentVersion = remember {
+        try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0" } catch (e: Exception) { "0" }
+    }
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
 
@@ -598,7 +613,7 @@ fun SettingsDialog(currentGameState: GameState, totalGames: Int, totalWins: Int,
         onDismissRequest = onDismiss,
         title = { Text("Game Settings") },
         text = {
-            Column {
+            Column(modifier = Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.60f).dp).verticalScroll(rememberScrollState())) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Help Mode Indicators")
                     Switch(checked = currentGameState.isHelpMode, onCheckedChange = { onUpdate(currentGameState.copy(isHelpMode = it)) })
@@ -640,7 +655,35 @@ fun SettingsDialog(currentGameState: GameState, totalGames: Int, totalWins: Int,
                 Text("Total Games Played: $totalGames", fontSize = 14.sp)
                 Text("Won: $totalWins | Lost: $totalLosses", fontSize = 14.sp)
                 Text("Total Time Played: ${hours}h${minutes}min", fontSize = 14.sp)
-                
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("App Version: v$currentVersion", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    enabled = !checkingUpdate,
+                    onClick = {
+                        checkingUpdate = true
+                        updateStatus = null
+                        scope.launch {
+                            val latest = withContext(Dispatchers.IO) { fetchLatestRelease() }
+                            checkingUpdate = false
+                            when {
+                                latest == null -> updateStatus = "Couldn't check for updates. Check your connection and try again."
+                                isNewerVersion(latest.tag, currentVersion) -> availableUpdate = latest
+                                else -> updateStatus = "You're on the latest version."
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (checkingUpdate) "Checking…" else "Check for update") }
+                if (updateStatus != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(updateStatus!!, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
                     text = "Developed by assix",
@@ -652,6 +695,24 @@ fun SettingsDialog(currentGameState: GameState, totalGames: Int, totalWins: Int,
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } }
     )
+
+    if (availableUpdate != null) {
+        val info = availableUpdate!!
+        AlertDialog(
+            onDismissRequest = { availableUpdate = null },
+            title = { Text("Update available") },
+            text = { Text("Version ${info.tag} is available — you have v$currentVersion. Download and install it?") },
+            confirmButton = {
+                Button(onClick = {
+                    uriHandler.openUri(info.downloadUrl)
+                    availableUpdate = null
+                }) { Text("Update") }
+            },
+            dismissButton = {
+                TextButton(onClick = { availableUpdate = null }) { Text("Not now") }
+            }
+        )
+    }
 }
 
 fun undoMove(state: GameState): GameState {
@@ -672,6 +733,54 @@ fun undoMove(state: GameState): GameState {
 }
 
 fun getDifficultyName(level: Int) = when(level) { 1 -> "Easy"; 2 -> "Medium"; 3 -> "Hard"; 4 -> "Expert"; else -> "Unknown" }
+
+// ------------------------- update check ---------------------------------
+
+data class ReleaseInfo(val tag: String, val downloadUrl: String, val pageUrl: String)
+
+/** Latest published GitHub release of the app, or null on any failure. */
+fun fetchLatestRelease(): ReleaseInfo? {
+    return try {
+        val conn = java.net.URL("https://api.github.com/repos/assix/Android-Chess-Game-AI/releases/latest")
+            .openConnection() as java.net.HttpURLConnection
+        conn.setRequestProperty("User-Agent", "MyApkChess-Android")
+        conn.setRequestProperty("Accept", "application/vnd.github+json")
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 10_000
+        if (conn.responseCode != 200) return null
+        val json = JSONObject(conn.inputStream.bufferedReader().readText())
+        val tag = json.optString("tag_name")
+        if (tag.isEmpty()) return null
+        var apkUrl: String? = null
+        val assets = json.optJSONArray("assets")
+        if (assets != null) {
+            for (i in 0 until assets.length()) {
+                val a = assets.getJSONObject(i)
+                if (a.optString("name").endsWith(".apk")) {
+                    apkUrl = a.optString("browser_download_url")
+                    break
+                }
+            }
+        }
+        val page = json.optString("html_url")
+        ReleaseInfo(tag, apkUrl ?: page, page)
+    } catch (e: Exception) {
+        null
+    }
+}
+
+/** True if [remoteTag] (e.g. "v0.9") is a newer version than [current] (e.g. "0.8.1"). */
+fun isNewerVersion(remoteTag: String, current: String): Boolean {
+    fun parts(v: String) = v.trim().removePrefix("v").split(".").map { it.toIntOrNull() ?: 0 }
+    val r = parts(remoteTag)
+    val c = parts(current)
+    for (i in 0 until maxOf(r.size, c.size)) {
+        val rv = r.getOrElse(i) { 0 }
+        val cv = c.getOrElse(i) { 0 }
+        if (rv != cv) return rv > cv
+    }
+    return false
+}
 
 @Composable
 fun PieceIcon(piece: ChessPiece, fontSize: TextUnit) {
