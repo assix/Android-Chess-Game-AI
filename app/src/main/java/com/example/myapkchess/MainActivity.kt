@@ -9,9 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -443,8 +441,7 @@ fun MainBoard(gameState: GameState, selectedPosition: Position?, isGameOver: Boo
                         val isSelected = pos == selectedPosition
                         val isPossibleMove = pos in possibleMoves
                         val isLightSquare = (row + col) % 2 == 0
-                        val bgColor = if (gameState.kingOfTheHill && pos in ChessLogic.HILL_SQUARES) Color(0xFFE3B505)
-                            else if (isLightSquare) Color(0xFFF0D9B5) else Color(0xFFB58863)
+                        val bgColor = if (isLightSquare) Color(0xFFF0D9B5) else Color(0xFFB58863)
                         
                         Box(
                             modifier = Modifier.weight(1f).fillMaxHeight().background(bgColor).clickable { onSquareClick(pos) },
@@ -520,7 +517,6 @@ fun StartDialog(
     var forceCapture by remember { mutableStateOf(initialForceCapture) }
     var koth by remember { mutableStateOf(initialKoth) }
     var kothStance by remember { mutableStateOf(initialKothStance) }
-    val configuration = LocalConfiguration.current
 
     AlertDialog(
         onDismissRequest = {},
@@ -531,22 +527,22 @@ fun StartDialog(
             // Cap the scrollable content height: without a cap the dialog
             // grows past the screen when the KOTH options expand, pushing
             // the Start Game button behind the system navigation bar.
-            Column(modifier = Modifier.heightIn(max = (configuration.screenHeightDp * 0.60f).dp).verticalScroll(rememberScrollState())) {
-                Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+            Column {
+                Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 2.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(1, 2, 3, 4).forEach { d ->
                         FilterChip(modifier = Modifier.weight(1f), selected = diff == d, onClick = { diff = d }, label = { Text(getDifficultyName(d), fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 1, softWrap = false, modifier = Modifier.fillMaxWidth()) })
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Force AI to capture when possible", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                     Switch(checked = forceCapture, onCheckedChange = { forceCapture = it })
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("King of the Hill", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
@@ -554,7 +550,7 @@ fun StartDialog(
                 }
 
                 if (koth) {
-                    Text("AI King of the Hill Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                    Text("AI King of the Hill Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         KothStance.entries.forEach { stance ->
                             FilterChip(modifier = Modifier.weight(1f), selected = kothStance == stance, onClick = { kothStance = stance }, label = { Text(stance.displayName, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) })
@@ -562,28 +558,28 @@ fun StartDialog(
                     }
                 }
 
-                Text("AI Play Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                Text("AI Play Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     PlayStyle.entries.forEach { style ->
                         FilterChip(modifier = Modifier.weight(1f), selected = playStyle == style, onClick = { playStyle = style }, label = { Text(style.displayName, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) })
                     }
                 }
 
-                Text("Your Color", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                Text("Your Color", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     ColorSelectionMode.entries.forEach { mode ->
                         FilterChip(modifier = Modifier.weight(1f), selected = colorMode == mode, onClick = { colorMode = mode }, label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }, fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 1, softWrap = false, modifier = Modifier.fillMaxWidth()) })
                     }
                 }
                 
-                Text("Time Control", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                Text("Time Control", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(3, 5, 10, 30).forEach { t ->
                         FilterChip(modifier = Modifier.weight(1f), selected = timeMins == t, onClick = { timeMins = t }, label = { Text("${t}m", fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) })
                     }
                 }
                 
-                Text("AI Opening Strategy", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                Text("AI Opening Strategy", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     OpeningType.entries.forEach { o ->
                         FilterChip(selected = opening == o, onClick = { opening = o }, label = { Text(o.displayName, fontSize = 12.sp) })
@@ -613,7 +609,7 @@ fun SettingsDialog(currentGameState: GameState, totalGames: Int, totalWins: Int,
         onDismissRequest = onDismiss,
         title = { Text("Game Settings") },
         text = {
-            Column(modifier = Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.60f).dp).verticalScroll(rememberScrollState())) {
+            Column {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Help Mode Indicators")
                     Switch(checked = currentGameState.isHelpMode, onCheckedChange = { onUpdate(currentGameState.copy(isHelpMode = it)) })
@@ -624,20 +620,6 @@ fun SettingsDialog(currentGameState: GameState, totalGames: Int, totalWins: Int,
                         Text("Force AI to capture when possible")
                     }
                     Switch(checked = currentGameState.forceCapture, onCheckedChange = { onUpdate(currentGameState.copy(forceCapture = it)) })
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("King of the Hill")
-                    Switch(checked = currentGameState.kingOfTheHill, onCheckedChange = { onUpdate(currentGameState.copy(kingOfTheHill = it)) })
-                }
-                if (currentGameState.kingOfTheHill) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("AI King of the Hill Style", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        KothStance.entries.forEach { stance ->
-                            FilterChip(modifier = Modifier.weight(1f), selected = currentGameState.kothStance == stance, onClick = { onUpdate(currentGameState.copy(kothStance = stance)) }, label = { Text(stance.displayName, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) })
-                        }
-                    }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Difficulty", fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))

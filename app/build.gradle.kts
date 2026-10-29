@@ -1,6 +1,19 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+// Optional fixed signing key: if a (git-ignored) keystore.properties file
+// exists at the repo root, debug and release builds are signed with that
+// key, so every build installs OVER the previous one instead of failing
+// with a signature mismatch whenever the build machine changes. Without
+// the file, builds fall back to the standard Android debug key.
+val keystoreProps = Properties()
+val keystorePropsFile = rootProject.file("keystore.properties")
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.inputStream().use { keystoreProps.load(it) }
 }
 
 android {
@@ -13,14 +26,33 @@ android {
         applicationId = "com.example.myapkchess"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.8.1"
+        versionCode = 6
+        versionName = "0.8.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (keystorePropsFile.exists()) {
+            create("pinned") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("pinned")
+            }
+        }
         release {
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("pinned")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -13,7 +13,7 @@ if [ $? -eq 0 ]; then
     echo "   app/build/outputs/apk/debug/app-debug.apk"
     echo ""
     echo "➡️  Suggested command to move and rename it:"
-    echo "   mv app/build/outputs/apk/debug/app-debug.apk MyApkChess_v0.8.1.apk"
+    echo "   mv app/build/outputs/apk/debug/app-debug.apk MyApkChess_v0.8.3.apk"
     echo ""
     echo "☁️  Test on your Android:"
     echo "   1. Upload the APK to Google Drive: https://drive.google.com/drive/folders/1Y1qij3gzu2wCnc_kN_unhhj0hIBNQ5Bp"
@@ -26,7 +26,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🚀 Finally, submit the new app to GitHub Releases:"
     echo "   Go to: https://github.com/assix/Android-Chess-Game-AI/releases"
-    echo "   Create a new release tagged 'v0.8.1', attach MyApkChess_v0.8.1.apk, and publish."
+    echo "   Create a new release tagged 'v0.8.3', attach MyApkChess_v0.8.3.apk, and publish."
     echo "================================================================"
 else
     echo "❌ BUILD FAILED. Check the errors above."
